@@ -12,6 +12,13 @@ readme = "README.md"
 keywords = ["vietnamese", "ime", "input-method", "telex", "unicode"]
 categories = ["text-processing"]
 
+include = [
+    "src/**",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE"
+]
+
 [dependencies]
 bitflags = "2.11.1"
 phf = { version = "0.13.1", features = ["macros"] }
