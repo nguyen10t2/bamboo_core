@@ -39,7 +39,7 @@ pub struct Transformation {
     pub is_upper_case: bool,
 }
 
-pub trait IEngine {
+pub trait Engine {
     fn set_flag(&mut self, flag: u32);
     fn get_input_method(&self) -> InputMethod;
     fn process_key(&mut self, key: char, mode: Mode);
@@ -100,11 +100,12 @@ impl BambooEngine {
             if key.is_ascii() {
                 ascii_rules_by_key[key as usize].push(rule.clone());
             } else {
-                let idx = *non_ascii_key_to_idx.entry(key).or_insert_with(|| {
-                    let idx = non_ascii_rules_by_key.len();
-                    non_ascii_rules_by_key.push((key, Vec::new()));
-                    idx
-                });
+                let idx =
+                    *non_ascii_key_to_idx.entry(key).or_insert_with(|| {
+                        let idx = non_ascii_rules_by_key.len();
+                        non_ascii_rules_by_key.push((key, Vec::new()));
+                        idx
+                    });
                 non_ascii_rules_by_key[idx].1.push(rule.clone());
             }
         }
@@ -159,7 +160,8 @@ impl BambooEngine {
 
     fn can_process_key_raw(&self, lower_key: char) -> bool {
         if crate::utils::is_alpha(lower_key)
-            || (lower_key.is_ascii() && self.ascii_effect_keys[lower_key as usize])
+            || (lower_key.is_ascii()
+                && self.ascii_effect_keys[lower_key as usize])
             || self.non_ascii_effect_keys.contains(&lower_key)
         {
             return true;
@@ -186,18 +188,21 @@ impl BambooEngine {
         &self,
         syllable: &[Transformation],
     ) -> Option<Transformation> {
-        let s = crate::fllattener::flatten_slice(syllable, TONE_LESS | LOWER_CASE);
+        let s =
+            crate::flattener::flatten_slice(syllable, TONE_LESS | LOWER_CASE);
         if !self.input_method.super_keys.is_empty() && uoh_tail_match(&s) {
             let refs: Vec<&Transformation> = syllable.iter().collect();
             let (target, missing_rule) =
                 self.find_target_by_key(&refs, self.input_method.super_keys[0]);
-            if let (Some(target), Some(mut missing_rule)) = (target, missing_rule) {
-            missing_rule.key = '\0';
-            return Some(Transformation {
-                rule: missing_rule,
-                target: Some(target),
-                is_upper_case: false,
-            });
+            if let (Some(target), Some(mut missing_rule)) =
+                (target, missing_rule)
+            {
+                missing_rule.key = '\0';
+                return Some(Transformation {
+                    rule: missing_rule,
+                    target: Some(target),
+                    is_upper_case: false,
+                });
             }
         }
         None
@@ -285,7 +290,8 @@ impl BambooEngine {
         if syllable_word_offset != 0 {
             for t in &mut syllable {
                 if let Some(target) = t.target {
-                    t.target = Some(target.saturating_sub(syllable_word_offset));
+                    t.target =
+                        Some(target.saturating_sub(syllable_word_offset));
                 }
             }
         }
@@ -306,7 +312,7 @@ impl BambooEngine {
     }
 }
 
-impl IEngine for BambooEngine {
+impl Engine for BambooEngine {
     fn set_flag(&mut self, flag: u32) {
         self.flags = flag;
     }
@@ -345,7 +351,7 @@ impl IEngine for BambooEngine {
 
     fn get_processed_str(&self, mode: Mode) -> String {
         if mode.contains(FULL_TEXT) {
-            return crate::fllattener::flatten_slice(&self.composition, mode);
+            return crate::flattener::flatten_slice(&self.composition, mode);
         }
 
         if mode.contains(PUNCTUATION_MODE) {
@@ -354,14 +360,14 @@ impl IEngine for BambooEngine {
                     &self.composition,
                     &self.input_method.keys,
                 );
-            return crate::fllattener::flatten(&tail, VIETNAMESE_MODE);
+            return crate::flattener::flatten(&tail, VIETNAMESE_MODE);
         }
 
         let (_, tail) = crate::bamboo_util::extract_last_word(
             &self.composition,
             Some(&self.input_method.keys),
         );
-        crate::fllattener::flatten(&tail, mode)
+        crate::flattener::flatten(&tail, mode)
     }
 
     fn is_valid(&self, input_is_full_complete: bool) -> bool {

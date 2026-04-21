@@ -1,5 +1,5 @@
 [package]
-name = "bamboo_core_rust"
+name = "bamboo-core"
 version = "0.1.0"
 edition = "2024"
 

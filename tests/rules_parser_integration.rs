@@ -1,15 +1,13 @@
-use bamboo_core_rust::rules_parser::{
-    parse_input_method, parse_rules, parse_toneless_rules, EffectType, Mark, Tone,
-};
+use bamboo_core::{EffectType, Mark, Tone, parse_input_method};
 
 #[test]
 fn parse_tone_rules() {
-    let rules = parse_rules('z', "XoaDauThanh");
+    let rules = bamboo_core::parse_rules('z', "XoaDauThanh");
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].effect_type, EffectType::ToneTransformation);
     assert_eq!(rules[0].effect, Tone::None as u8);
 
-    let rules = parse_rules('x', "DauNga");
+    let rules = bamboo_core::parse_rules('x', "DauNga");
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].effect_type, EffectType::ToneTransformation);
     assert_eq!(rules[0].get_tone(), Tone::Tilde);
@@ -17,18 +15,18 @@ fn parse_tone_rules() {
 
 #[test]
 fn parse_toneless_rules_cases() {
-    let rules = parse_toneless_rules('d', "D_Đ");
+    let rules = bamboo_core::parse_toneless_rules('d', "D_Đ");
     assert_eq!(rules.len(), 2);
     assert_eq!(rules[0].effect_type, EffectType::MarkTransformation);
     assert_eq!(rules[0].effect, Mark::Dash as u8);
     assert_eq!(rules[0].effect_on, 'd');
 
-    let rules = parse_toneless_rules('{', "_Ư");
+    let rules = bamboo_core::parse_toneless_rules('{', "_Ư");
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].effect_type, EffectType::Appending);
     assert_eq!(rules[0].effect_on, 'Ư');
 
-    let rules = parse_toneless_rules('w', "UOA_ƯƠĂ");
+    let rules = bamboo_core::parse_toneless_rules('w', "UOA_ƯƠĂ");
     assert_eq!(rules.len(), 33);
     assert_eq!(rules[0].effect_type, EffectType::MarkTransformation);
     assert_eq!(rules[0].get_mark(), Mark::Horn);
@@ -40,7 +38,7 @@ fn parse_toneless_rules_cases() {
     assert_eq!(rules[20].get_mark(), Mark::Breve);
     assert_eq!(rules[20].effect_on, 'a');
 
-    let rules = parse_toneless_rules('w', "UOA_ƯƠĂ__Ư");
+    let rules = bamboo_core::parse_toneless_rules('w', "UOA_ƯƠĂ__Ư");
     assert_eq!(rules.len(), 34);
     assert_eq!(rules[20].effect_type, EffectType::MarkTransformation);
     assert_eq!(rules[20].get_mark(), Mark::Breve);
@@ -51,14 +49,14 @@ fn parse_toneless_rules_cases() {
 
 #[test]
 fn parse_append_rule() {
-    let rules = parse_toneless_rules('[', "__ươ");
+    let rules = bamboo_core::parse_toneless_rules('[', "__ươ");
     assert_eq!(rules.len(), 1);
     let append_rules = &rules[0].appended_rules;
     assert_eq!(append_rules.len(), 1);
     assert_eq!(append_rules[0].effect_type, EffectType::Appending);
     assert_eq!(append_rules[0].effect_on, 'ơ');
 
-    let rules = parse_toneless_rules('{', "__ƯƠ");
+    let rules = bamboo_core::parse_toneless_rules('{', "__ƯƠ");
     assert_eq!(rules.len(), 1);
     let append_rules = &rules[0].appended_rules;
     assert_eq!(append_rules.len(), 1);
@@ -75,7 +73,7 @@ fn parse_input_method_super_key_detection() {
 #[test]
 fn parse_telex_o_hat_rule_exists() {
     // In Telex, typing 'o' after an existing 'o' should be able to mark it as 'ô'.
-    let rules = parse_toneless_rules('o', "O_Ô");
+    let rules = bamboo_core::parse_toneless_rules('o', "O_Ô");
     assert!(rules.iter().any(|r| {
         r.effect_type == EffectType::MarkTransformation
             && r.get_mark() == Mark::Hat

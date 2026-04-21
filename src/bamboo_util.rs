@@ -2,7 +2,7 @@ use crate::bamboo::{
     EFREE_TONE_MARKING, ENGLISH_MODE, ESTD_TONE_STYLE, LOWER_CASE, MARK_LESS,
     TONE_LESS, Transformation, VIETNAMESE_MODE,
 };
-use crate::fllattener::{first_canvas_char_in_suffix, flatten};
+use crate::flattener::{first_canvas_char_in_suffix, flatten};
 use crate::rules_parser::{EffectType, Mark, Rule, Tone};
 use crate::spelling::is_valid_cvc;
 use crate::utils::{add_tone_to_char, is_alpha, is_space, is_vowel};
@@ -239,7 +239,6 @@ fn get_last_tone_transformation<'a>(
             && t.target.is_some()
     })
 }
-
 
 fn is_free(
     composition: &[&Transformation],
