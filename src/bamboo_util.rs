@@ -240,6 +240,7 @@ fn get_last_tone_transformation<'a>(
     })
 }
 
+
 fn is_free(
     composition: &[&Transformation],
     trans: usize,
@@ -777,10 +778,10 @@ pub(crate) fn generate_fallback_transformations(
     transformations
 }
 
-pub(crate) fn break_composition(
-    composition: &[&Transformation],
+pub(crate) fn break_composition_slice(
+    composition: &[Transformation],
 ) -> Vec<Transformation> {
-    let mut result: Vec<Transformation> = Vec::new();
+    let mut result: Vec<Transformation> = Vec::with_capacity(composition.len());
     for trans in composition {
         if trans.rule.key == '\0' {
             continue;
@@ -794,26 +795,31 @@ pub(crate) fn refresh_last_tone_target(
     composition: &mut [Transformation],
     std_style: bool,
 ) -> Vec<Transformation> {
-    let refs: Vec<&Transformation> = composition.iter().collect();
-    let rightmost_vowels = get_right_most_vowels(&refs);
-    let last_tone_trans = get_last_tone_transformation(&refs);
-
-    if rightmost_vowels.is_empty() || last_tone_trans.is_none() {
-        return Vec::new();
-    }
-
-    let new_tone_target = find_tone_target(&refs, std_style);
-
-    // Find mutable pointer to the last tone transformation in `composition`.
-    let mut last_tone_idx: Option<usize> = None;
-    for (i, t) in composition.iter().enumerate().rev() {
-        if t.rule.effect_type == EffectType::ToneTransformation
-            && t.target.is_some()
+    // Compute tone retargeting using immutable borrows first,
+    // then mutate `composition` after those borrows are dropped.
+    let (new_tone_target, last_tone_idx) = {
+        let refs: Vec<&Transformation> = composition.iter().collect();
+        let rightmost_vowels = get_right_most_vowels(&refs);
+        if rightmost_vowels.is_empty()
+            || get_last_tone_transformation(&refs).is_none()
         {
-            last_tone_idx = Some(i);
-            break;
+            return Vec::new();
         }
-    }
+
+        let new_tone_target = find_tone_target(&refs, std_style);
+
+        let mut last_tone_idx: Option<usize> = None;
+        for (i, t) in composition.iter().enumerate().rev() {
+            if t.rule.effect_type == EffectType::ToneTransformation
+                && t.target.is_some()
+            {
+                last_tone_idx = Some(i);
+                break;
+            }
+        }
+
+        (new_tone_target, last_tone_idx)
+    };
 
     let Some(idx) = last_tone_idx else { return Vec::new() };
 
@@ -822,7 +828,6 @@ pub(crate) fn refresh_last_tone_target(
         return Vec::new();
     }
 
-    // Update the tone transformation's target in-place.
     composition[idx].target = new_tone_target;
 
     let mut transformations: Vec<Transformation> = Vec::new();

@@ -93,28 +93,33 @@ impl BambooEngine {
         let mut ascii_rules_by_key: [Vec<Rule>; 128] =
             array::from_fn(|_| Vec::new());
         let mut non_ascii_rules_by_key: Vec<(char, Vec<Rule>)> = Vec::new();
+        let mut non_ascii_key_to_idx: std::collections::BTreeMap<char, usize> =
+            std::collections::BTreeMap::new();
         for rule in &input_method.rules {
             let key = lower(rule.key);
             if key.is_ascii() {
                 ascii_rules_by_key[key as usize].push(rule.clone());
-            } else if let Some((_, rules)) =
-                non_ascii_rules_by_key.iter_mut().find(|(k, _)| *k == key)
-            {
-                rules.push(rule.clone());
             } else {
-                non_ascii_rules_by_key.push((key, vec![rule.clone()]));
+                let idx = *non_ascii_key_to_idx.entry(key).or_insert_with(|| {
+                    let idx = non_ascii_rules_by_key.len();
+                    non_ascii_rules_by_key.push((key, Vec::new()));
+                    idx
+                });
+                non_ascii_rules_by_key[idx].1.push(rule.clone());
             }
         }
 
         let mut ascii_effect_keys = [false; 128];
-        let mut non_ascii_effect_keys = Vec::new();
+        let mut non_ascii_effect_keys: Vec<char> = Vec::new();
         for key in &input_method.keys {
             if key.is_ascii() {
                 ascii_effect_keys[*key as usize] = true;
-            } else if !non_ascii_effect_keys.contains(key) {
+            } else {
                 non_ascii_effect_keys.push(*key);
             }
         }
+        non_ascii_effect_keys.sort_unstable();
+        non_ascii_effect_keys.dedup();
 
         Self {
             composition: Vec::new(),
@@ -181,19 +186,19 @@ impl BambooEngine {
         &self,
         syllable: &[Transformation],
     ) -> Option<Transformation> {
-        let refs: Vec<&Transformation> = syllable.iter().collect();
-        let s = crate::fllattener::flatten(&refs, TONE_LESS | LOWER_CASE);
-        if !self.input_method.super_keys.is_empty()
-            && uoh_tail_match(&s)
-            && let (Some(target), Some(mut missing_rule)) =
-                self.find_target_by_key(&refs, self.input_method.super_keys[0])
-        {
+        let s = crate::fllattener::flatten_slice(syllable, TONE_LESS | LOWER_CASE);
+        if !self.input_method.super_keys.is_empty() && uoh_tail_match(&s) {
+            let refs: Vec<&Transformation> = syllable.iter().collect();
+            let (target, missing_rule) =
+                self.find_target_by_key(&refs, self.input_method.super_keys[0]);
+            if let (Some(target), Some(mut missing_rule)) = (target, missing_rule) {
             missing_rule.key = '\0';
             return Some(Transformation {
                 rule: missing_rule,
                 target: Some(target),
                 is_upper_case: false,
             });
+            }
         }
         None
     }
@@ -340,8 +345,7 @@ impl IEngine for BambooEngine {
 
     fn get_processed_str(&self, mode: Mode) -> String {
         if mode.contains(FULL_TEXT) {
-            let refs: Vec<&Transformation> = self.composition.iter().collect();
-            return crate::fllattener::flatten(&refs, mode);
+            return crate::fllattener::flatten_slice(&self.composition, mode);
         }
 
         if mode.contains(PUNCTUATION_MODE) {
@@ -438,8 +442,7 @@ impl IEngine for BambooEngine {
         }
 
         if !to_vietnamese {
-            let refs: Vec<&Transformation> = last.iter().collect();
-            previous.extend(crate::bamboo_util::break_composition(&refs));
+            previous.extend(crate::bamboo_util::break_composition_slice(&last));
             self.composition = previous;
             return;
         }

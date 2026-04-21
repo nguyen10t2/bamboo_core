@@ -14,18 +14,48 @@ fn upper(c: char) -> char {
 }
 
 pub fn flatten(composition: &[&Transformation], mode: Mode) -> String {
-    get_canvas(composition, mode).into_iter().collect()
+    let mut out = String::with_capacity(estimate_len_refs(composition, mode));
+    write_canvas_refs(composition, mode, &mut out);
+    out
 }
 
-pub(crate) fn get_canvas(
-    composition: &[&Transformation],
-    mode: Mode,
-) -> Vec<char> {
-    let mut canvas: Vec<char> = Vec::new();
+pub(crate) fn flatten_slice(composition: &[Transformation], mode: Mode) -> String {
+    let mut out = String::with_capacity(estimate_len_slice(composition, mode));
+    write_canvas_slice(composition, mode, &mut out);
+    out
+}
 
+fn estimate_len_refs(composition: &[&Transformation], mode: Mode) -> usize {
+    if mode.contains(ENGLISH_MODE) {
+        composition.iter().filter(|t| t.rule.key != '\0').count()
+    } else {
+        composition
+            .iter()
+            .filter(|t| {
+                t.rule.effect_type == EffectType::Appending && t.rule.key != '\0'
+            })
+            .count()
+    }
+}
+
+fn estimate_len_slice(composition: &[Transformation], mode: Mode) -> usize {
+    if mode.contains(ENGLISH_MODE) {
+        composition.iter().filter(|t| t.rule.key != '\0').count()
+    } else {
+        composition
+            .iter()
+            .filter(|t| {
+                t.rule.effect_type == EffectType::Appending && t.rule.key != '\0'
+            })
+            .count()
+    }
+}
+
+fn write_canvas_refs(composition: &[&Transformation], mode: Mode, out: &mut String) {
     let mut effects_by_target: Vec<Vec<&Transformation>> =
         vec![Vec::new(); composition.len()];
-    let mut appending_list: Vec<(usize, &Transformation)> = Vec::new();
+    let mut appending_list: Vec<(usize, &Transformation)> =
+        Vec::with_capacity(estimate_len_refs(composition, mode));
 
     for (idx, trans) in composition.iter().enumerate() {
         if mode.contains(ENGLISH_MODE) {
@@ -83,10 +113,78 @@ pub(crate) fn get_canvas(
             chr = upper(chr);
         }
 
-        canvas.push(chr);
+        out.push(chr);
+    }
+}
+
+fn write_canvas_slice(
+    composition: &[Transformation],
+    mode: Mode,
+    out: &mut String,
+) {
+    let mut effects_by_target: Vec<Vec<&Transformation>> =
+        vec![Vec::new(); composition.len()];
+    let mut appending_list: Vec<(usize, &Transformation)> =
+        Vec::with_capacity(estimate_len_slice(composition, mode));
+
+    for (idx, trans) in composition.iter().enumerate() {
+        if mode.contains(ENGLISH_MODE) {
+            if trans.rule.key == '\0' {
+                continue; // ignore virtual key in raw output
+            }
+            appending_list.push((idx, trans));
+        } else if trans.rule.effect_type == EffectType::Appending {
+            if trans.rule.key == '\0' {
+                continue; // ignore virtual appending key
+            }
+            appending_list.push((idx, trans));
+        } else if let Some(target) = trans.target
+            && target < effects_by_target.len()
+        {
+            effects_by_target[target].push(trans);
+        }
     }
 
-    canvas
+    for (idx, appending_trans) in appending_list {
+        let mut chr: char;
+        let trans_list: &[&Transformation] =
+            effects_by_target.get(idx).map(Vec::as_slice).unwrap_or(&[]);
+
+        if mode.contains(ENGLISH_MODE) {
+            chr = appending_trans.rule.key;
+        } else {
+            chr = appending_trans.rule.effect_on;
+            for trans in trans_list {
+                match trans.rule.effect_type {
+                    EffectType::MarkTransformation => {
+                        if trans.rule.effect == Mark::Raw as u8 {
+                            chr = appending_trans.rule.key;
+                        } else {
+                            chr = add_mark_to_char(chr, trans.rule.effect);
+                        }
+                    }
+                    EffectType::ToneTransformation => {
+                        chr = add_tone_to_char(chr, trans.rule.effect);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if mode.contains(TONE_LESS) {
+            chr = add_tone_to_char(chr, 0);
+        }
+        if mode.contains(MARK_LESS) {
+            chr = add_mark_to_char(chr, 0);
+        }
+        if mode.contains(LOWER_CASE) {
+            chr = lower(chr);
+        } else if appending_trans.is_upper_case {
+            chr = upper(chr);
+        }
+
+        out.push(chr);
+    }
 }
 
 pub(crate) fn first_canvas_char_in_suffix(
@@ -242,5 +340,47 @@ mod tests {
         };
         let comp = vec![x, o, mark_hat];
         assert_eq!(first_canvas_char_in_suffix(&comp, 1, VIETNAMESE_MODE), Some('ô'));
+    }
+
+    #[test]
+    fn flatten_applies_mark_and_tone_in_order() {
+        let o = Transformation {
+            rule: Rule {
+                key: 'o',
+                effect: 0,
+                effect_type: EffectType::Appending,
+                effect_on: 'o',
+                result: 'o',
+                appended_rules: Vec::new(),
+            },
+            target: None,
+            is_upper_case: false,
+        };
+        let hat = Transformation {
+            rule: Rule {
+                key: 'o',
+                effect: 1, // Mark::Hat
+                effect_type: EffectType::MarkTransformation,
+                effect_on: 'o',
+                result: 'ô',
+                appended_rules: Vec::new(),
+            },
+            target: Some(0),
+            is_upper_case: false,
+        };
+        let acute = Transformation {
+            rule: Rule {
+                key: 's',
+                effect: 2, // Tone::Acute
+                effect_type: EffectType::ToneTransformation,
+                effect_on: '\0',
+                result: '\0',
+                appended_rules: Vec::new(),
+            },
+            target: Some(0),
+            is_upper_case: false,
+        };
+        let comp = vec![o, hat, acute];
+        assert_eq!(flatten_slice(&comp, VIETNAMESE_MODE), "ố");
     }
 }
