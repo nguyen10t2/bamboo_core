@@ -256,13 +256,45 @@ impl BambooEngine {
         key: char,
         is_upper_case: bool,
     ) -> Vec<Transformation> {
-        let (prev_len, _last_syllable_refs) =
-            crate::bamboo_util::extract_last_syllable(&composition);
+        // We generate transformations on the last syllable, but targets must remain
+        // consistent within the *last word* (so that later rendering of the last word
+        // applies effects to the right character).
+        let (previous_slice, last_refs) =
+            crate::bamboo_util::extract_last_word(&composition, None);
+        let word_start = previous_slice.len();
 
-        let mut syllable = composition.split_off(prev_len);
+        // Recompute syllable start within the last word using validity checks.
+        let mut anchor = 0usize;
+        for i in 0..last_refs.len() {
+            if !crate::bamboo_util::is_valid(&last_refs[anchor..=i], false) {
+                anchor = i;
+            }
+        }
+        let syllable_abs_start = word_start + anchor;
+        let syllable_word_offset = anchor;
+
+        let mut syllable = composition.split_off(syllable_abs_start);
         let mut previous = composition;
 
+        // Rebase existing targets in the syllable to be syllable-local (0-based).
+        if syllable_word_offset != 0 {
+            for t in &mut syllable {
+                if let Some(target) = t.target {
+                    t.target = Some(target.saturating_sub(syllable_word_offset));
+                }
+            }
+        }
+
         self.generate_transformations(&mut syllable, key, is_upper_case);
+
+        // Convert targets back to be word-local (relative to the last word start).
+        if syllable_word_offset != 0 {
+            for t in &mut syllable {
+                if let Some(target) = t.target {
+                    t.target = Some(target + syllable_word_offset);
+                }
+            }
+        }
 
         previous.extend(syllable);
         previous

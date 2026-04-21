@@ -369,7 +369,8 @@ pub(crate) fn extract_last_word_with_punctuation_marks<'a>(
     _effect_keys: &[char],
 ) -> (&'a [Transformation], Vec<&'a Transformation>) {
     for i in (0..composition.len()).rev() {
-        let Some(c) = first_canvas_char_in_suffix(composition, i, ENGLISH_MODE) else {
+        let Some(c) = first_canvas_char_in_suffix(composition, i, ENGLISH_MODE)
+        else {
             continue;
         };
         if is_space(c) {
@@ -408,20 +409,6 @@ pub(crate) fn extract_last_word<'a>(
     }
 
     (&[], composition.iter().collect())
-}
-
-pub(crate) fn extract_last_syllable(
-    composition: &[Transformation],
-) -> (usize, Vec<&Transformation>) {
-    let (previous, last) = extract_last_word(composition, None);
-    let mut anchor = 0usize;
-    for i in 0..last.len() {
-        if !is_valid(&last[anchor..=i], false) {
-            anchor = i;
-        }
-    }
-
-    (previous.len() + anchor, last[anchor..].to_vec())
 }
 
 fn find_mark_target(

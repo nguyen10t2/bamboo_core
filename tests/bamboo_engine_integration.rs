@@ -71,7 +71,13 @@ fn process_toowi_case() {
 #[test]
 fn process_aloo_case() {
     let mut ng = new_std_engine();
-    ng.process_str("aloo", VIETNAMESE_MODE);
+    ng.process_str("alo", VIETNAMESE_MODE);
+    assert_eq!(ng.get_processed_str(ENGLISH_MODE | bamboo_core_rust::bamboo::FULL_TEXT), "alo");
+    assert_eq!(ng.get_processed_str(VIETNAMESE_MODE), "alo");
+
+    ng.process_str("o", VIETNAMESE_MODE);
+    // Telex 'o' should act as a mark key here (not a literal append-only key).
+    assert_eq!(ng.get_processed_str(ENGLISH_MODE | bamboo_core_rust::bamboo::FULL_TEXT), "aloo");
     assert_eq!(ng.get_processed_str(VIETNAMESE_MODE), "alô");
 }
 

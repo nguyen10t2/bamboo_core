@@ -71,3 +71,24 @@ fn parse_input_method_super_key_detection() {
     let im = parse_input_method("Telex");
     assert!(im.super_keys.contains(&'w'));
 }
+
+#[test]
+fn parse_telex_o_hat_rule_exists() {
+    // In Telex, typing 'o' after an existing 'o' should be able to mark it as 'ô'.
+    let rules = parse_toneless_rules('o', "O_Ô");
+    assert!(rules.iter().any(|r| {
+        r.effect_type == EffectType::MarkTransformation
+            && r.get_mark() == Mark::Hat
+            && r.effect_on == 'o'
+            && r.result == 'ô'
+    }));
+    assert!(!rules.iter().any(|r| r.effect_type == EffectType::Appending));
+}
+
+#[test]
+fn telex2_has_no_appending_rule_for_o() {
+    let im = parse_input_method("Telex 2");
+    let o_rules: Vec<_> = im.rules.iter().filter(|r| r.key == 'o').collect();
+    assert!(!o_rules.is_empty());
+    assert!(!o_rules.iter().any(|r| r.effect_type == EffectType::Appending));
+}
