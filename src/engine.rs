@@ -1,55 +1,15 @@
-use bitflags::bitflags;
 use std::array;
 
-use crate::rules_parser::{InputMethod, Rule};
+use crate::config::Config;
+use crate::input_method::{InputMethod, Rule};
+use crate::mode::{Mode, OutputOptions};
 
-bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Mode: u32 {
-        const VIETNAMESE = 1 << 0;
-        const ENGLISH = 1 << 1;
-        const TONE_LESS = 1 << 2;
-        const MARK_LESS = 1 << 3;
-        const LOWER_CASE = 1 << 4;
-        const FULL_TEXT = 1 << 5;
-        const PUNCTUATION_MODE = 1 << 6;
-        const IN_REVERSE_ORDER = 1 << 7;
-    }
-}
-
-pub const VIETNAMESE_MODE: Mode = Mode::VIETNAMESE;
-pub const ENGLISH_MODE: Mode = Mode::ENGLISH;
-pub const TONE_LESS: Mode = Mode::TONE_LESS;
-pub const MARK_LESS: Mode = Mode::MARK_LESS;
-pub const LOWER_CASE: Mode = Mode::LOWER_CASE;
-pub const FULL_TEXT: Mode = Mode::FULL_TEXT;
-pub const PUNCTUATION_MODE: Mode = Mode::PUNCTUATION_MODE;
-pub const IN_REVERSE_ORDER: Mode = Mode::IN_REVERSE_ORDER;
-
-pub const EFREE_TONE_MARKING: u32 = 1 << 0;
-pub const ESTD_TONE_STYLE: u32 = 1 << 1;
-pub const EAUTO_CORRECT_ENABLED: u32 = 1 << 2;
-pub const ESTD_FLAGS: u32 =
-    EFREE_TONE_MARKING | ESTD_TONE_STYLE | EAUTO_CORRECT_ENABLED;
-
+#[derive(Clone, Debug)]
 pub struct Transformation {
     pub rule: Rule,
     /// Index of an earlier transformation in the same composition.
     pub target: Option<usize>,
     pub is_upper_case: bool,
-}
-
-pub trait Engine {
-    fn set_flag(&mut self, flag: u32);
-    fn get_input_method(&self) -> InputMethod;
-    fn process_key(&mut self, key: char, mode: Mode);
-    fn process_str(&mut self, s: &str, mode: Mode);
-    fn get_processed_str(&self, mode: Mode) -> String;
-    fn is_valid(&self, input_is_full_complete: bool) -> bool;
-    fn can_process_key(&self, key: char) -> bool;
-    fn remove_last_char(&mut self, refresh_last_tone_target: bool);
-    fn restore_last_word(&mut self, to_vietnamese: bool);
-    fn reset(&mut self);
 }
 
 #[inline]
@@ -74,23 +34,22 @@ fn uoh_tail_match(s: &str) -> bool {
     false
 }
 
-pub struct BambooEngine {
+pub struct Engine {
     composition: Vec<Transformation>,
     input_method: InputMethod,
     ascii_rules_by_key: [Vec<Rule>; 128],
     non_ascii_rules_by_key: Vec<(char, Vec<Rule>)>,
     ascii_effect_keys: [bool; 128],
     non_ascii_effect_keys: Vec<char>,
-    flags: u32,
+    config: Config,
 }
 
-#[allow(unused)]
-pub fn new_engine(input_method: InputMethod, flags: u32) -> BambooEngine {
-    BambooEngine::new(input_method, flags)
-}
+impl Engine {
+    pub fn new(input_method: InputMethod) -> Self {
+        Self::with_config(input_method, Config::default())
+    }
 
-impl BambooEngine {
-    pub fn new(input_method: InputMethod, flags: u32) -> Self {
+    pub fn with_config(input_method: InputMethod, config: Config) -> Self {
         let mut ascii_rules_by_key: [Vec<Rule>; 128] =
             array::from_fn(|_| Vec::new());
         let mut non_ascii_rules_by_key: Vec<(char, Vec<Rule>)> = Vec::new();
@@ -130,20 +89,20 @@ impl BambooEngine {
             non_ascii_rules_by_key,
             ascii_effect_keys,
             non_ascii_effect_keys,
-            flags,
+            config,
         }
     }
 
-    pub fn get_input_method(&self) -> InputMethod {
+    pub fn config(&self) -> Config {
+        self.config
+    }
+
+    pub fn set_config(&mut self, config: Config) {
+        self.config = config;
+    }
+
+    pub fn input_method(&self) -> InputMethod {
         self.input_method.clone()
-    }
-
-    pub fn set_flag(&mut self, flags: u32) {
-        self.flags = flags;
-    }
-
-    pub fn get_flag(&self) -> u32 {
-        self.flags
     }
 
     fn get_applicable_rules(&self, key: char) -> &[Rule] {
@@ -181,7 +140,7 @@ impl BambooEngine {
         crate::bamboo_util::find_target(
             composition,
             self.get_applicable_rules(key),
-            self.flags,
+            self.config.to_flags(),
         )
     }
 
@@ -189,8 +148,10 @@ impl BambooEngine {
         &self,
         syllable: &[Transformation],
     ) -> Option<Transformation> {
-        let s =
-            crate::flattener::flatten_slice(syllable, TONE_LESS | LOWER_CASE);
+        let s = crate::flattener::flatten_slice(
+            syllable,
+            OutputOptions::TONE_LESS | OutputOptions::LOWER_CASE,
+        );
         if !self.input_method.super_keys.is_empty() && uoh_tail_match(&s) {
             let refs: Vec<&Transformation> = syllable.iter().collect();
             let (target, missing_rule) =
@@ -214,12 +175,12 @@ impl BambooEngine {
         syllable: &mut [Transformation],
     ) -> Vec<Transformation> {
         let refs: Vec<&Transformation> = syllable.iter().collect();
-        if (self.flags & EFREE_TONE_MARKING) != 0
+        if self.config.free_tone_marking
             && crate::bamboo_util::is_valid(&refs, false)
         {
             return crate::bamboo_util::refresh_last_tone_target(
                 syllable,
-                (self.flags & ESTD_TONE_STYLE) != 0,
+                self.config.std_tone_style,
             );
         }
         Vec::new()
@@ -237,7 +198,7 @@ impl BambooEngine {
         let mut trans = crate::bamboo_util::generate_transformations(
             &refs,
             applicable,
-            self.flags,
+            self.config.to_flags(),
             lower_key,
             is_upper_case,
         );
@@ -267,14 +228,10 @@ impl BambooEngine {
         key: char,
         is_upper_case: bool,
     ) -> Vec<Transformation> {
-        // We generate transformations on the last syllable, but targets must remain
-        // consistent within the *last word* (so that later rendering of the last word
-        // applies effects to the right character).
         let (previous_slice, last_refs) =
             crate::bamboo_util::extract_last_word(&composition, None);
         let word_start = previous_slice.len();
 
-        // Recompute syllable start within the last word using validity checks.
         let mut anchor = 0usize;
         for i in 0..last_refs.len() {
             if !crate::bamboo_util::is_valid(&last_refs[anchor..=i], false) {
@@ -287,7 +244,6 @@ impl BambooEngine {
         let mut syllable = composition.split_off(syllable_abs_start);
         let mut previous = composition;
 
-        // Rebase existing targets in the syllable to be syllable-local (0-based).
         if syllable_word_offset != 0 {
             for t in &mut syllable {
                 if let Some(target) = t.target {
@@ -299,7 +255,6 @@ impl BambooEngine {
 
         self.generate_transformations(&mut syllable, key, is_upper_case);
 
-        // Convert targets back to be word-local (relative to the last word start).
         if syllable_word_offset != 0 {
             for t in &mut syllable {
                 if let Some(target) = t.target {
@@ -311,37 +266,23 @@ impl BambooEngine {
         previous.extend(syllable);
         previous
     }
-}
 
-impl Engine for BambooEngine {
-    fn set_flag(&mut self, flag: u32) {
-        self.flags = flag;
-    }
-
-    fn get_input_method(&self) -> InputMethod {
-        self.input_method.clone()
-    }
-
-    fn process_str(&mut self, s: &str, mode: Mode) {
+    pub fn process_str(&mut self, s: &str, mode: Mode) {
         for key in s.chars() {
             self.process_key(key, mode);
         }
     }
 
-    fn process_key(&mut self, key: char, mode: Mode) {
+    pub fn process_key(&mut self, key: char, mode: Mode) {
         let lower_key = lower(key);
         let is_upper_case = is_upper(key);
 
-        if mode.contains(ENGLISH_MODE) || !self.can_process_key_raw(lower_key) {
+        if mode == Mode::English || !self.can_process_key_raw(lower_key) {
             let trans = crate::bamboo_util::new_appending_trans(
                 lower_key,
                 is_upper_case,
             );
-            if mode.contains(IN_REVERSE_ORDER) {
-                self.composition.insert(0, trans);
-            } else {
-                self.composition.push(trans);
-            }
+            self.composition.push(trans);
             return;
         }
 
@@ -350,28 +291,32 @@ impl Engine for BambooEngine {
             self.new_composition(current, lower_key, is_upper_case);
     }
 
-    fn get_processed_str(&self, mode: Mode) -> String {
-        if mode.contains(FULL_TEXT) {
-            return crate::flattener::flatten_slice(&self.composition, mode);
+    pub fn output(&self) -> String {
+        self.get_processed_str(OutputOptions::NONE)
+    }
+
+    pub fn get_processed_str(&self, options: OutputOptions) -> String {
+        if options.contains(OutputOptions::FULL_TEXT) {
+            return crate::flattener::flatten_slice(&self.composition, options);
         }
 
-        if mode.contains(PUNCTUATION_MODE) {
+        if options.contains(OutputOptions::PUNCTUATION_MODE) {
             let (_, tail) =
                 crate::bamboo_util::extract_last_word_with_punctuation_marks(
                     &self.composition,
                     &self.input_method.keys,
                 );
-            return crate::flattener::flatten(&tail, VIETNAMESE_MODE);
+            return crate::flattener::flatten(&tail, OutputOptions::NONE);
         }
 
         let (_, tail) = crate::bamboo_util::extract_last_word(
             &self.composition,
             Some(&self.input_method.keys),
         );
-        crate::flattener::flatten(&tail, mode)
+        crate::flattener::flatten(&tail, options)
     }
 
-    fn is_valid(&self, input_is_full_complete: bool) -> bool {
+    pub fn is_valid(&self, input_is_full_complete: bool) -> bool {
         let (_, last) = crate::bamboo_util::extract_last_word(
             &self.composition,
             Some(&self.input_method.keys),
@@ -379,15 +324,14 @@ impl Engine for BambooEngine {
         crate::bamboo_util::is_valid(&last, input_is_full_complete)
     }
 
-    fn can_process_key(&self, key: char) -> bool {
+    pub fn can_process_key(&self, key: char) -> bool {
         self.can_process_key_raw(lower(key))
     }
 
-    fn remove_last_char(&mut self, refresh_last_tone_target: bool) {
-        // Find last appending
+    pub fn remove_last_char(&mut self, refresh_last_tone_target: bool) {
         let mut last_appending_idx: Option<usize> = None;
         for (idx, t) in self.composition.iter().enumerate().rev() {
-            if t.rule.effect_type == crate::rules_parser::EffectType::Appending
+            if t.rule.effect_type == crate::input_method::EffectType::Appending
             {
                 last_appending_idx = Some(idx);
                 break;
@@ -432,7 +376,7 @@ impl Engine for BambooEngine {
         self.composition = previous;
     }
 
-    fn restore_last_word(&mut self, to_vietnamese: bool) {
+    pub fn restore_last_word(&mut self, to_vietnamese: bool) {
         let (previous_slice, _last_refs) =
             crate::bamboo_util::extract_last_word(
                 &self.composition,
@@ -467,7 +411,7 @@ impl Engine for BambooEngine {
         self.composition = previous;
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.composition.clear();
     }
 }

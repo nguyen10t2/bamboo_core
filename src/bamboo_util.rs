@@ -1,11 +1,12 @@
-use crate::bamboo::{
-    EFREE_TONE_MARKING, ENGLISH_MODE, ESTD_TONE_STYLE, LOWER_CASE, MARK_LESS,
-    TONE_LESS, Transformation, VIETNAMESE_MODE,
-};
+use crate::engine::Transformation;
 use crate::flattener::{first_canvas_char_in_suffix, flatten};
-use crate::rules_parser::{EffectType, Mark, Rule, Tone};
+use crate::input_method::{EffectType, Mark, Rule, Tone};
+use crate::mode::OutputOptions;
 use crate::spelling::is_valid_cvc;
 use crate::utils::{add_tone_to_char, is_alpha, is_space, is_vowel};
+
+const EFREE_TONE_MARKING: u32 = 1 << 0;
+const ESTD_TONE_STYLE: u32 = 1 << 1;
 
 #[inline]
 fn lower(c: char) -> char {
@@ -128,7 +129,9 @@ pub(crate) fn is_valid(
 
     // spell checking
     let (fc, vo, lc) = extract_cvc_trans(composition);
-    let flatten_mode = VIETNAMESE_MODE | LOWER_CASE | TONE_LESS;
+    let flatten_mode = OutputOptions::NONE
+        | OutputOptions::LOWER_CASE
+        | OutputOptions::TONE_LESS;
     is_valid_cvc(
         &flatten(&fc, flatten_mode),
         &flatten(&vo, flatten_mode),
@@ -183,8 +186,13 @@ fn find_tone_target(
             return idx_of(composition, vowels[1]);
         }
 
-        let s =
-            flatten(&vowels, ENGLISH_MODE | LOWER_CASE | TONE_LESS | MARK_LESS);
+        let s = flatten(
+            &vowels,
+            OutputOptions::RAW
+                | OutputOptions::LOWER_CASE
+                | OutputOptions::TONE_LESS
+                | OutputOptions::MARK_LESS,
+        );
         return Some(
             if matches!(s.as_str(), "oa" | "oe" | "uy" | "ue" | "uo") {
                 idx_of(composition, vowels[1]).unwrap_or(0)
@@ -198,7 +206,10 @@ fn find_tone_target(
         return Some(
             if flatten(
                 &vowels,
-                ENGLISH_MODE | LOWER_CASE | TONE_LESS | MARK_LESS,
+                OutputOptions::RAW
+                    | OutputOptions::LOWER_CASE
+                    | OutputOptions::TONE_LESS
+                    | OutputOptions::MARK_LESS,
             ) == "uye"
             {
                 idx_of(composition, vowels[2]).unwrap_or(0)
@@ -221,7 +232,8 @@ fn has_valid_tone(composition: &[&Transformation], tone: Tone) -> bool {
         return true;
     }
 
-    let last_consonants = flatten(&lc, ENGLISH_MODE | LOWER_CASE);
+    let last_consonants =
+        flatten(&lc, OutputOptions::RAW | OutputOptions::LOWER_CASE);
     for s in ["c", "k", "p", "t", "ch"] {
         if s == last_consonants {
             return false;
@@ -369,7 +381,8 @@ pub(crate) fn extract_last_word_with_punctuation_marks<'a>(
     _effect_keys: &[char],
 ) -> (&'a [Transformation], Vec<&'a Transformation>) {
     for i in (0..composition.len()).rev() {
-        let Some(c) = first_canvas_char_in_suffix(composition, i, ENGLISH_MODE)
+        let Some(c) =
+            first_canvas_char_in_suffix(composition, i, OutputOptions::RAW)
         else {
             continue;
         };
@@ -394,7 +407,10 @@ pub(crate) fn extract_last_word<'a>(
         let Some(c) = first_canvas_char_in_suffix(
             composition,
             i,
-            VIETNAMESE_MODE | LOWER_CASE | TONE_LESS | MARK_LESS,
+            OutputOptions::NONE
+                | OutputOptions::LOWER_CASE
+                | OutputOptions::TONE_LESS
+                | OutputOptions::MARK_LESS,
         ) else {
             continue;
         };
@@ -415,7 +431,7 @@ fn find_mark_target(
     composition: &[&Transformation],
     rules: &[Rule],
 ) -> (Option<usize>, Option<Rule>) {
-    let s = flatten(composition, VIETNAMESE_MODE);
+    let s = flatten(composition, OutputOptions::NONE);
 
     for trans in composition.iter().rev() {
         for rule in rules {
@@ -435,7 +451,7 @@ fn find_mark_target(
                 };
                 let mut tmp = composition.to_vec();
                 tmp.push(&virtual_trans);
-                if s == flatten(&tmp, VIETNAMESE_MODE) {
+                if s == flatten(&tmp, OutputOptions::NONE) {
                     continue;
                 }
 
@@ -462,7 +478,7 @@ pub(crate) fn find_target(
     applicable_rules: &[Rule],
     flags: u32,
 ) -> (Option<usize>, Option<Rule>) {
-    let s = flatten(composition, VIETNAMESE_MODE);
+    let s = flatten(composition, OutputOptions::NONE);
 
     // find tone target
     for applicable_rule in applicable_rules {
@@ -502,7 +518,7 @@ pub(crate) fn find_target(
         };
         let mut tmp = composition.to_vec();
         tmp.push(&virtual_trans);
-        if s == flatten(&tmp, VIETNAMESE_MODE) {
+        if s == flatten(&tmp, OutputOptions::NONE) {
             continue;
         }
 
@@ -531,7 +547,12 @@ fn generate_undo_transformations(
     flags: u32,
 ) -> Vec<Transformation> {
     let mut transformations: Vec<Transformation> = Vec::new();
-    let s = flatten(composition, VIETNAMESE_MODE | TONE_LESS | LOWER_CASE);
+    let s = flatten(
+        composition,
+        OutputOptions::NONE
+            | OutputOptions::TONE_LESS
+            | OutputOptions::LOWER_CASE,
+    );
 
     for rule in rules {
         if rule.effect_type == EffectType::ToneTransformation {
@@ -600,7 +621,9 @@ fn generate_undo_transformations(
                     tmp.push(&undo);
                     if s == flatten(
                         &tmp,
-                        VIETNAMESE_MODE | TONE_LESS | LOWER_CASE,
+                        OutputOptions::NONE
+                            | OutputOptions::TONE_LESS
+                            | OutputOptions::LOWER_CASE,
                     ) {
                         continue;
                     }
@@ -697,8 +720,12 @@ pub(crate) fn generate_transformations(
         }
     } else {
         // Implement ươ/ưo(i/c/ng) + o -> uô
-        let flat =
-            flatten(composition, VIETNAMESE_MODE | TONE_LESS | LOWER_CASE);
+        let flat = flatten(
+            composition,
+            OutputOptions::NONE
+                | OutputOptions::TONE_LESS
+                | OutputOptions::LOWER_CASE,
+        );
         if contains_uho(&flat) {
             let rightmost = get_right_most_vowels(composition);
             let vowels = filter_appending_composition(&rightmost);

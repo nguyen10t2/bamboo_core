@@ -2181,10 +2181,13 @@ static CHARSET_DEFINITIONS: Map<&'static str, &'static CharsetDefinition> = phf_
     "Unicode C string Decimal" => &CHARSET_16,
 };
 
-pub fn get_charset_definition(name: &str) -> Option<&'static CharsetDefinition> {
+pub fn get_charset_definition(
+    name: &str,
+) -> Option<&'static CharsetDefinition> {
     CHARSET_DEFINITIONS.get(name).copied()
 }
 
-pub fn get_charset_definitions() -> &'static Map<&'static str, &'static CharsetDefinition> {
+pub fn get_charset_definitions()
+-> &'static Map<&'static str, &'static CharsetDefinition> {
     &CHARSET_DEFINITIONS
 }

@@ -1,153 +1,158 @@
-use bamboo_core::{Engine, Mode};
+use bamboo_core::{Engine, InputMethod, Mode, OutputOptions};
 
-fn new_std_engine() -> bamboo_core::BambooEngine {
-    let im = bamboo_core::parse_input_method("Telex 2");
-    bamboo_core::BambooEngine::new(im, bamboo_core::ESTD_FLAGS)
+fn new_std_engine() -> Engine {
+    Engine::new(InputMethod::telex_2())
 }
 
 #[test]
 fn process_basic_strings() {
     let mut ng = new_std_engine();
-    ng.process_str("aw", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "ă");
+    ng.process_str("aw", Mode::Vietnamese);
+    assert_eq!(ng.output(), "ă");
 
     ng.reset();
-    ng.process_str("uw", Mode::VIETNAMESE);
-    ng.process_str("o", Mode::VIETNAMESE);
-    ng.process_str("w", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "ươ");
+    ng.process_str("uw", Mode::Vietnamese);
+    ng.process_str("o", Mode::Vietnamese);
+    ng.process_str("w", Mode::Vietnamese);
+    assert_eq!(ng.output(), "ươ");
 
     ng.reset();
-    ng.process_str("chuaarn", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "chuẩn");
+    ng.process_str("chuaarn", Mode::Vietnamese);
+    assert_eq!(ng.output(), "chuẩn");
 
     ng.reset();
-    ng.process_str("giamaf", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "giầm");
+    ng.process_str("giamaf", Mode::Vietnamese);
+    assert_eq!(ng.output(), "giầm");
 }
 
 #[test]
 fn process_dd_and_validity() {
     let mut ng = new_std_engine();
-    ng.process_str("dd", Mode::VIETNAMESE);
+    ng.process_str("dd", Mode::Vietnamese);
     assert!(ng.is_valid(false));
 
     ng.reset();
-    ng.process_str("ddafi", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "đài");
+    ng.process_str("ddafi", Mode::Vietnamese);
+    assert_eq!(ng.output(), "đài");
 }
 
 #[test]
 fn process_upper_and_remove_last_char() {
     let mut ng = new_std_engine();
-    ng.process_str("VIEETJ", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "VIỆT");
+    ng.process_str("VIEETJ", Mode::Vietnamese);
+    assert_eq!(ng.output(), "VIỆT");
 
     ng.remove_last_char(false);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "VIỆ");
+    assert_eq!(ng.output(), "VIỆ");
 
-    ng.process_key('Q', Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::ENGLISH), "VIEEJQ");
+    ng.process_key('Q', Mode::Vietnamese);
+    assert_eq!(ng.get_processed_str(OutputOptions::RAW), "VIEEJQ");
 }
 
 #[test]
 fn process_double_w() {
     let mut ng = new_std_engine();
-    ng.process_str("ww", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::ENGLISH), "w");
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "w");
+    ng.process_str("ww", Mode::Vietnamese);
+    assert_eq!(ng.get_processed_str(OutputOptions::RAW), "w");
+    assert_eq!(ng.output(), "w");
 }
 
 #[test]
 fn process_toowi_case() {
     let mut ng = new_std_engine();
-    ng.process_str("toowi", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "tơi");
+    ng.process_str("toowi", Mode::Vietnamese);
+    assert_eq!(ng.output(), "tơi");
 }
 
 #[test]
 fn process_aloo_case() {
     let mut ng = new_std_engine();
-    ng.process_str("alo", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::ENGLISH | Mode::FULL_TEXT), "alo");
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "alo");
+    ng.process_str("alo", Mode::Vietnamese);
+    assert_eq!(
+        ng.get_processed_str(OutputOptions::RAW | OutputOptions::FULL_TEXT),
+        "alo"
+    );
+    assert_eq!(ng.output(), "alo");
 
-    ng.process_str("o", Mode::VIETNAMESE);
+    ng.process_str("o", Mode::Vietnamese);
     // Telex 'o' should act as a mark key here (not a literal append-only key).
-    assert_eq!(ng.get_processed_str(Mode::ENGLISH | Mode::FULL_TEXT), "aloo");
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "alô");
+    assert_eq!(
+        ng.get_processed_str(OutputOptions::RAW | OutputOptions::FULL_TEXT),
+        "aloo"
+    );
+    assert_eq!(ng.output(), "alô");
 }
 
 #[test]
 fn process_muoiwq_and_mootj() {
     let mut ng = new_std_engine();
-    ng.process_str("Muoiwq", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::ENGLISH), "Muoiwq");
+    ng.process_str("Muoiwq", Mode::Vietnamese);
+    assert_eq!(ng.get_processed_str(OutputOptions::RAW), "Muoiwq");
 
     ng.reset();
-    ng.process_str("mootj", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "một");
+    ng.process_str("mootj", Mode::Vietnamese);
+    assert_eq!(ng.output(), "một");
 }
 
 #[test]
 fn process_refresh_combo() {
     let mut ng = new_std_engine();
-    ng.process_str("reff", Mode::VIETNAMESE);
-    ng.process_str("resh", Mode::ENGLISH);
-    assert_eq!(ng.get_processed_str(Mode::ENGLISH), "reffresh");
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "refresh");
+    ng.process_str("reff", Mode::Vietnamese);
+    ng.process_str("resh", Mode::English);
+    assert_eq!(ng.get_processed_str(OutputOptions::RAW), "reffresh");
+    assert_eq!(ng.output(), "refresh");
 }
 
 #[test]
 fn process_double_w2() {
     let mut ng = new_std_engine();
-    ng.process_str("wiw", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "uiw");
-    assert_eq!(ng.get_processed_str(Mode::ENGLISH), "wiw");
+    ng.process_str("wiw", Mode::Vietnamese);
+    assert_eq!(ng.output(), "uiw");
+    assert_eq!(ng.get_processed_str(OutputOptions::RAW), "wiw");
 }
 
 #[test]
 fn process_duwoi() {
     let mut ng = new_std_engine();
-    ng.process_str("duwoi", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "dươi");
+    ng.process_str("duwoi", Mode::Vietnamese);
+    assert_eq!(ng.output(), "dươi");
 }
 
 #[test]
 fn process_kimso_and_toorr() {
     let mut ng = new_std_engine();
-    ng.process_str("kimso", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "kímo");
+    ng.process_str("kimso", Mode::Vietnamese);
+    assert_eq!(ng.output(), "kímo");
 
     ng.reset();
-    ng.process_str("toorr", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "tôr");
+    ng.process_str("toorr", Mode::Vietnamese);
+    assert_eq!(ng.output(), "tôr");
 }
 
 #[test]
 fn process_z_processing() {
     let mut ng = new_std_engine();
-    ng.process_str("loz", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "loz");
+    ng.process_str("loz", Mode::Vietnamese);
+    assert_eq!(ng.output(), "loz");
 
     ng.reset();
-    ng.process_str("losz", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "lo");
-    assert_eq!(ng.get_processed_str(Mode::ENGLISH), "losz");
+    ng.process_str("losz", Mode::Vietnamese);
+    assert_eq!(ng.output(), "lo");
+    assert_eq!(ng.get_processed_str(OutputOptions::RAW), "losz");
 }
 
 #[test]
 fn restore_last_word_basic() {
     let mut ng = new_std_engine();
-    ng.process_str("duwongj tooi", Mode::VIETNAMESE);
+    ng.process_str("duwongj tooi", Mode::Vietnamese);
     ng.restore_last_word(false);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "tooi");
+    assert_eq!(ng.output(), "tooi");
 }
 
 #[test]
 fn process_double_typing_linux() {
     let mut ng = new_std_engine();
-    ng.process_str("linux", Mode::VIETNAMESE);
-    ng.process_str("x", Mode::VIETNAMESE);
-    assert_eq!(ng.get_processed_str(Mode::VIETNAMESE), "linux");
+    ng.process_str("linux", Mode::Vietnamese);
+    ng.process_str("x", Mode::Vietnamese);
+    assert_eq!(ng.output(), "linux");
 }

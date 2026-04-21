@@ -64,7 +64,8 @@ fn lookup_mask(
             let mut is_match = true;
             for (ic, tc) in input.chars().zip(token.chars()) {
                 if ic != tc
-                    && (input_is_complete || add_mark_to_toneless_char(tc, 0) != ic)
+                    && (input_is_complete
+                        || add_mark_to_toneless_char(tc, 0) != ic)
                 {
                     is_match = false;
                     break;
@@ -85,7 +86,9 @@ fn is_valid_cv(fc_mask: u16, vo_mask: u16) -> bool {
     let mut mask = fc_mask;
     while mask != 0 {
         let idx = mask.trailing_zeros() as usize;
-        if idx < CV_ALLOWED_MASKS.len() && (CV_ALLOWED_MASKS[idx] & vo_mask) != 0 {
+        if idx < CV_ALLOWED_MASKS.len()
+            && (CV_ALLOWED_MASKS[idx] & vo_mask) != 0
+        {
             return true;
         }
         mask &= mask - 1;
@@ -97,7 +100,9 @@ fn is_valid_vc(vo_mask: u16, lc_mask: u16) -> bool {
     let mut mask = vo_mask;
     while mask != 0 {
         let idx = mask.trailing_zeros() as usize;
-        if idx < VC_ALLOWED_MASKS.len() && (VC_ALLOWED_MASKS[idx] & lc_mask) != 0 {
+        if idx < VC_ALLOWED_MASKS.len()
+            && (VC_ALLOWED_MASKS[idx] & lc_mask) != 0
+        {
             return true;
         }
         mask &= mask - 1;
@@ -107,7 +112,8 @@ fn is_valid_vc(vo_mask: u16, lc_mask: u16) -> bool {
 
 pub fn is_valid_cvc(fc: &str, vo: &str, lc: &str, full: bool) -> bool {
     let fc_mask = if !fc.is_empty() {
-        let m = lookup_mask(FIRST_CONSONANT_SEQS, fc, full || !vo.is_empty(), true);
+        let m =
+            lookup_mask(FIRST_CONSONANT_SEQS, fc, full || !vo.is_empty(), true);
         if m == 0 {
             return false;
         }

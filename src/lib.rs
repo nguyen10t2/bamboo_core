@@ -6,21 +6,17 @@
 //! # Quick Start
 //!
 //! ```
-//! use bamboo_core::{Engine, Mode, BambooEngine, ESTD_FLAGS, parse_input_method};
+//! use bamboo_core::{Engine, Mode, InputMethod};
 //!
 //! // Create an engine with Telex input method
-//! let im = parse_input_method("Telex");
-//! let mut engine = BambooEngine::new(im, ESTD_FLAGS);
+//! let mut engine = Engine::new(InputMethod::telex());
 //!
 //! // Process some keys
-//! engine.process_key('t', Mode::VIETNAMESE);
-//! engine.process_key('r', Mode::VIETNAMESE);
-//! engine.process_key('a', Mode::VIETNAMESE);
-//! engine.process_key('n', Mode::VIETNAMESE);
+//! engine.process_str("trangws", Mode::Vietnamese);
 //!
-//! // Get the processed string (English mode to see the raw input)
-//! let result = engine.get_processed_str(Mode::ENGLISH);
-//! assert_eq!(result, "tran");
+//! // Get the processed string
+//! let result = engine.output();
+//! assert_eq!(result, "trắng");
 //! ```
 //!
 //! # Features
@@ -31,26 +27,34 @@
 //! - Mark transformation support
 //! - Input validation and auto-correction
 
-mod bamboo;
 mod bamboo_util;
 mod charset_def;
+mod config;
 mod encoder;
+mod engine;
 mod flattener;
+mod input_method;
 mod input_method_def;
-mod rules_parser;
+mod mode;
 mod spelling;
 mod utils;
 
-// Re-export public types at the crate root
-pub use bamboo::{BambooEngine, ESTD_FLAGS, Engine, Mode};
-pub use bamboo::{
-    ENGLISH_MODE, FULL_TEXT, IN_REVERSE_ORDER, LOWER_CASE, MARK_LESS,
-    PUNCTUATION_MODE, TONE_LESS, VIETNAMESE_MODE,
-};
-pub use charset_def::{get_charset_definition, get_charset_definitions};
-pub use encoder::{encode, get_charset_names};
-pub use input_method_def::{get_input_method, get_input_method_definitions};
-pub use rules_parser::{
-    EffectType, InputMethod, Mark, Rule, Tone, parse_input_method, parse_rules,
-    parse_toneless_rules,
-};
+pub use config::Config;
+pub use engine::Engine;
+pub use input_method::InputMethod;
+pub use mode::{Mode, OutputOptions};
+
+/// Advanced types for low-level interaction with the engine.
+pub mod advanced {
+    pub use crate::engine::Transformation;
+    pub use crate::input_method::{EffectType, Mark, Rule, Tone};
+    pub use crate::mode::OutputOptions;
+
+    pub use crate::charset_def::{
+        get_charset_definition, get_charset_definitions,
+    };
+    pub use crate::encoder::{encode, get_charset_names};
+    pub use crate::input_method_def::{
+        get_input_method, get_input_method_definitions,
+    };
+}

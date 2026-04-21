@@ -1,6 +1,6 @@
-use crate::bamboo::Transformation;
-use crate::bamboo::{ENGLISH_MODE, LOWER_CASE, MARK_LESS, Mode, TONE_LESS};
-use crate::rules_parser::{EffectType, Mark};
+use crate::engine::Transformation;
+use crate::input_method::{EffectType, Mark};
+use crate::mode::OutputOptions;
 use crate::utils::{add_mark_to_char, add_tone_to_char};
 
 #[inline]
@@ -13,52 +13,72 @@ fn upper(c: char) -> char {
     c.to_uppercase().next().unwrap_or(c)
 }
 
-pub fn flatten(composition: &[&Transformation], mode: Mode) -> String {
-    let mut out = String::with_capacity(estimate_len_refs(composition, mode));
-    write_canvas_refs(composition, mode, &mut out);
+pub fn flatten(
+    composition: &[&Transformation],
+    options: OutputOptions,
+) -> String {
+    let mut out =
+        String::with_capacity(estimate_len_refs(composition, options));
+    write_canvas_refs(composition, options, &mut out);
     out
 }
 
-pub(crate) fn flatten_slice(composition: &[Transformation], mode: Mode) -> String {
-    let mut out = String::with_capacity(estimate_len_slice(composition, mode));
-    write_canvas_slice(composition, mode, &mut out);
+pub(crate) fn flatten_slice(
+    composition: &[Transformation],
+    options: OutputOptions,
+) -> String {
+    let mut out =
+        String::with_capacity(estimate_len_slice(composition, options));
+    write_canvas_slice(composition, options, &mut out);
     out
 }
 
-fn estimate_len_refs(composition: &[&Transformation], mode: Mode) -> usize {
-    if mode.contains(ENGLISH_MODE) {
+fn estimate_len_refs(
+    composition: &[&Transformation],
+    options: OutputOptions,
+) -> usize {
+    if options.contains(OutputOptions::RAW) {
         composition.iter().filter(|t| t.rule.key != '\0').count()
     } else {
         composition
             .iter()
             .filter(|t| {
-                t.rule.effect_type == EffectType::Appending && t.rule.key != '\0'
+                t.rule.effect_type == EffectType::Appending
+                    && t.rule.key != '\0'
             })
             .count()
     }
 }
 
-fn estimate_len_slice(composition: &[Transformation], mode: Mode) -> usize {
-    if mode.contains(ENGLISH_MODE) {
+fn estimate_len_slice(
+    composition: &[Transformation],
+    options: OutputOptions,
+) -> usize {
+    if options.contains(OutputOptions::RAW) {
         composition.iter().filter(|t| t.rule.key != '\0').count()
     } else {
         composition
             .iter()
             .filter(|t| {
-                t.rule.effect_type == EffectType::Appending && t.rule.key != '\0'
+                t.rule.effect_type == EffectType::Appending
+                    && t.rule.key != '\0'
             })
             .count()
     }
 }
 
-fn write_canvas_refs(composition: &[&Transformation], mode: Mode, out: &mut String) {
+fn write_canvas_refs(
+    composition: &[&Transformation],
+    options: OutputOptions,
+    out: &mut String,
+) {
     let mut effects_by_target: Vec<Vec<&Transformation>> =
         vec![Vec::new(); composition.len()];
     let mut appending_list: Vec<(usize, &Transformation)> =
-        Vec::with_capacity(estimate_len_refs(composition, mode));
+        Vec::with_capacity(estimate_len_refs(composition, options));
 
     for (idx, trans) in composition.iter().enumerate() {
-        if mode.contains(ENGLISH_MODE) {
+        if options.contains(OutputOptions::RAW) {
             if trans.rule.key == '\0' {
                 continue; // ignore virtual key in raw output
             }
@@ -80,7 +100,7 @@ fn write_canvas_refs(composition: &[&Transformation], mode: Mode, out: &mut Stri
         let trans_list: &[&Transformation] =
             effects_by_target.get(idx).map(Vec::as_slice).unwrap_or(&[]);
 
-        if mode.contains(ENGLISH_MODE) {
+        if options.contains(OutputOptions::RAW) {
             chr = appending_trans.rule.key;
         } else {
             chr = appending_trans.rule.effect_on;
@@ -101,13 +121,13 @@ fn write_canvas_refs(composition: &[&Transformation], mode: Mode, out: &mut Stri
             }
         }
 
-        if mode.contains(TONE_LESS) {
+        if options.contains(OutputOptions::TONE_LESS) {
             chr = add_tone_to_char(chr, 0);
         }
-        if mode.contains(MARK_LESS) {
+        if options.contains(OutputOptions::MARK_LESS) {
             chr = add_mark_to_char(chr, 0);
         }
-        if mode.contains(LOWER_CASE) {
+        if options.contains(OutputOptions::LOWER_CASE) {
             chr = lower(chr);
         } else if appending_trans.is_upper_case {
             chr = upper(chr);
@@ -119,16 +139,16 @@ fn write_canvas_refs(composition: &[&Transformation], mode: Mode, out: &mut Stri
 
 fn write_canvas_slice(
     composition: &[Transformation],
-    mode: Mode,
+    options: OutputOptions,
     out: &mut String,
 ) {
     let mut effects_by_target: Vec<Vec<&Transformation>> =
         vec![Vec::new(); composition.len()];
     let mut appending_list: Vec<(usize, &Transformation)> =
-        Vec::with_capacity(estimate_len_slice(composition, mode));
+        Vec::with_capacity(estimate_len_slice(composition, options));
 
     for (idx, trans) in composition.iter().enumerate() {
-        if mode.contains(ENGLISH_MODE) {
+        if options.contains(OutputOptions::RAW) {
             if trans.rule.key == '\0' {
                 continue; // ignore virtual key in raw output
             }
@@ -150,7 +170,7 @@ fn write_canvas_slice(
         let trans_list: &[&Transformation] =
             effects_by_target.get(idx).map(Vec::as_slice).unwrap_or(&[]);
 
-        if mode.contains(ENGLISH_MODE) {
+        if options.contains(OutputOptions::RAW) {
             chr = appending_trans.rule.key;
         } else {
             chr = appending_trans.rule.effect_on;
@@ -171,13 +191,13 @@ fn write_canvas_slice(
             }
         }
 
-        if mode.contains(TONE_LESS) {
+        if options.contains(OutputOptions::TONE_LESS) {
             chr = add_tone_to_char(chr, 0);
         }
-        if mode.contains(MARK_LESS) {
+        if options.contains(OutputOptions::MARK_LESS) {
             chr = add_mark_to_char(chr, 0);
         }
-        if mode.contains(LOWER_CASE) {
+        if options.contains(OutputOptions::LOWER_CASE) {
             chr = lower(chr);
         } else if appending_trans.is_upper_case {
             chr = upper(chr);
@@ -190,12 +210,12 @@ fn write_canvas_slice(
 pub(crate) fn first_canvas_char_in_suffix(
     composition: &[Transformation],
     start: usize,
-    mode: Mode,
+    options: OutputOptions,
 ) -> Option<char> {
     let mut first: Option<(usize, &Transformation)> = None;
     for (idx, trans) in composition[start..].iter().enumerate() {
         let abs_idx = start + idx;
-        if mode.contains(ENGLISH_MODE) {
+        if options.contains(OutputOptions::RAW) {
             if trans.rule.key == '\0' {
                 continue;
             }
@@ -211,7 +231,7 @@ pub(crate) fn first_canvas_char_in_suffix(
     }
 
     let (target_abs_idx, appending_trans) = first?;
-    let mut chr = if mode.contains(ENGLISH_MODE) {
+    let mut chr = if options.contains(OutputOptions::RAW) {
         appending_trans.rule.key
     } else {
         let mut c = appending_trans.rule.effect_on;
@@ -236,13 +256,13 @@ pub(crate) fn first_canvas_char_in_suffix(
         c
     };
 
-    if mode.contains(TONE_LESS) {
+    if options.contains(OutputOptions::TONE_LESS) {
         chr = add_tone_to_char(chr, 0);
     }
-    if mode.contains(MARK_LESS) {
+    if options.contains(OutputOptions::MARK_LESS) {
         chr = add_mark_to_char(chr, 0);
     }
-    if mode.contains(LOWER_CASE) {
+    if options.contains(OutputOptions::LOWER_CASE) {
         chr = lower(chr);
     } else if appending_trans.is_upper_case {
         chr = upper(chr);
@@ -254,8 +274,7 @@ pub(crate) fn first_canvas_char_in_suffix(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bamboo::VIETNAMESE_MODE;
-    use crate::rules_parser::{EffectType, Rule};
+    use crate::input_method::{EffectType, Rule};
 
     #[test]
     fn first_canvas_char_in_suffix_handles_offsets() {
@@ -296,8 +315,14 @@ mod tests {
             is_upper_case: false,
         };
         let comp = vec![t1, t2, t3];
-        assert_eq!(first_canvas_char_in_suffix(&comp, 1, ENGLISH_MODE), Some(' '));
-        assert_eq!(first_canvas_char_in_suffix(&comp, 2, VIETNAMESE_MODE), Some('w'));
+        assert_eq!(
+            first_canvas_char_in_suffix(&comp, 1, OutputOptions::RAW),
+            Some(' ')
+        );
+        assert_eq!(
+            first_canvas_char_in_suffix(&comp, 2, OutputOptions::NONE),
+            Some('w')
+        );
     }
 
     #[test]
@@ -339,7 +364,10 @@ mod tests {
             is_upper_case: false,
         };
         let comp = vec![x, o, mark_hat];
-        assert_eq!(first_canvas_char_in_suffix(&comp, 1, VIETNAMESE_MODE), Some('ô'));
+        assert_eq!(
+            first_canvas_char_in_suffix(&comp, 1, OutputOptions::NONE),
+            Some('ô')
+        );
     }
 
     #[test]
@@ -381,6 +409,6 @@ mod tests {
             is_upper_case: false,
         };
         let comp = vec![o, hat, acute];
-        assert_eq!(flatten_slice(&comp, VIETNAMESE_MODE), "ố");
+        assert_eq!(flatten_slice(&comp, OutputOptions::NONE), "ố");
     }
 }
