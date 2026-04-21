@@ -5,10 +5,11 @@ edition = "2024"
 
 description = "Vietnamese input method engine written in Rust"
 license = "MIT"
-repository = "https://github.com/yourname/bamboo_core_rust"
+repository = "https://github.com/nguyen10t2/bamboo_core"
+documentation = "https://docs.rs/bamboo-core"
 readme = "README.md"
 
-keywords = ["vietnamese", "input-method", "telex", "unicode"]
+keywords = ["vietnamese", "ime", "input-method", "telex", "unicode"]
 categories = ["text-processing"]
 
 [dependencies]

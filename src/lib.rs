@@ -12,10 +12,8 @@
 //! let mut engine = Engine::new(InputMethod::telex());
 //!
 //! // Process some keys
-//! engine.process_str("trangws", Mode::Vietnamese);
+//! let result = engine.process_str("trangws", Mode::Vietnamese).output();
 //!
-//! // Get the processed string
-//! let result = engine.output();
 //! assert_eq!(result, "trắng");
 //! ```
 //!

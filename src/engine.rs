@@ -267,10 +267,15 @@ impl Engine {
         previous
     }
 
-    pub fn process_str(&mut self, s: &str, mode: Mode) {
+    pub fn process(&mut self, s: &str, mode: Mode) -> String {
+        self.process_str(s, mode).output()
+    }
+
+    pub fn process_str(&mut self, s: &str, mode: Mode) -> &Self {
         for key in s.chars() {
             self.process_key(key, mode);
         }
+        self
     }
 
     pub fn process_key(&mut self, key: char, mode: Mode) {
