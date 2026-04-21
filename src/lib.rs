@@ -1,29 +1,69 @@
-//! Bamboo Core Rust - Vietnamese Input Method Engine
+//! # Bamboo Core Rust
 //!
-//! This crate provides a high-level Vietnamese input method engine supporting
-//! multiple input methods (Telex, VNI, VIQR, Microsoft layout, etc.).
+//! A high-performance Vietnamese input method engine (IME) core, ported from the original
+//! [bamboo-core](https://github.com/BambooEngine/bamboo-core) in Go.
 //!
-//! # Quick Start
+//! This crate provides the foundational logic for processing Vietnamese text, supporting
+//! various input methods like Telex, VNI, and VIQR. It is designed to be fast,
+//! memory-efficient (zero-allocation in core processing), and easy to integrate into
+//! UI applications or other text processing tools.
 //!
-//! ```
+//! ## Core Concepts
+//!
+//! - **[`Engine`]**: The main stateful processor. You feed it characters/strings, and it
+//!   maintains the internal composition state to produce the correctly marked Vietnamese text.
+//! - **[`InputMethod`]**: Defines the rules for transformations (e.g., how "as" becomes "á").
+//!   Built-in methods include [`InputMethod::telex()`], [`InputMethod::vni()`], etc.
+//! - **[`Mode`]**: Determines if the engine should process characters as Vietnamese or
+//!   treat them as plain English.
+//! - **[`OutputOptions`]**: A bitmask to customize the flattened string output (e.g., lowercase,
+//!   toneless, etc.).
+//!
+//! ## Quick Start
+//!
+//! ```rust
 //! use bamboo_core::{Engine, Mode, InputMethod};
 //!
-//! // Create an engine with Telex input method
+//! // Create an engine with the standard Telex input method
 //! let mut engine = Engine::new(InputMethod::telex());
 //!
-//! // Process some keys
-//! let result = engine.process_str("trangws", Mode::Vietnamese).output();
+//! // Process a string of keys
+//! engine.process_str("tieengs vieetj", Mode::Vietnamese);
 //!
-//! assert_eq!(result, "trắng");
+//! // Get the final result
+//! assert_eq!(engine.output(), "tiếng việt");
 //! ```
 //!
-//! # Features
+//! ## Advanced Usage
 //!
-//! - Multiple input methods: Telex, VNI, VIQR, Microsoft layout, and more
-//! - Full Unicode support
-//! - Tone mark positioning rules
-//! - Mark transformation support
-//! - Input validation and auto-correction
+//! ### Customizing Output
+//!
+//! You can use [`OutputOptions`] to transform the result on the fly:
+//!
+//! ```rust
+//! use bamboo_core::{Engine, Mode, InputMethod, OutputOptions};
+//!
+//! let mut engine = Engine::new(InputMethod::telex());
+//! engine.process_str("Trangws", Mode::Vietnamese);
+//!
+//! // Get toneless version
+//! let options = OutputOptions::TONE_LESS;
+//! assert_eq!(engine.get_processed_str(options), "Trăng");
+//! ```
+//!
+//! ### Handling Backspaces
+//!
+//! The engine supports removing the last transformation:
+//!
+//! ```rust
+//! # use bamboo_core::{Engine, Mode, InputMethod};
+//! # let mut engine = Engine::new(InputMethod::telex());
+//! engine.process_str("chuyeenr", Mode::Vietnamese);
+//! assert_eq!(engine.output(), "chuyển");
+//!
+//! engine.remove_last_char(true); // true to refresh tone positioning
+//! assert_eq!(engine.output(), "chuyên");
+//! ```
 
 mod bamboo_util;
 mod charset_def;
@@ -43,6 +83,9 @@ pub use input_method::InputMethod;
 pub use mode::{Mode, OutputOptions};
 
 /// Advanced types for low-level interaction with the engine.
+///
+/// This module exposes internal structures like [`crate::advanced::Transformation`] and raw definitions
+/// for users who need to build custom input methods or analyze the composition state.
 pub mod advanced {
     pub use crate::engine::Transformation;
     pub use crate::input_method::{EffectType, Mark, Rule, Tone};

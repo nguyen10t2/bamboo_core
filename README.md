@@ -40,7 +40,25 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## References
+## Performance (Benchmark)
+
+Bamboo Core Rust is designed for high-performance and low-latency text processing. Below is a comparison between the original Go implementation and this Rust port.
+
+### Benchmark Results (Telex)
+
+| Implementation | Time/Op (Lower is better) | Speedup | Memory Allocations |
+| :--- | :--- | :--- | :--- |
+| **Go** | ~5818 µs | 1.00x | ~910 KB/op (24,178 allocs) |
+| **Rust** | **~2139 µs** | **2.72x** | **Zero-allocation** |
+
+*Environment: Intel(R) Core(TM) i7-7500U CPU @ 2.70GHz, Linux. Optimized with LTO and target-cpu=native.*
+
+### Why Rust is faster?
+- **No Garbage Collection:** Eliminates pauses and overhead associated with Go's GC.
+- **Efficient Memory Layout:** Uses stack-allocated structs for transformations instead of heap-allocated pointers.
+- **Link-Time Optimization (LTO):** Deep compiler optimizations across crate boundaries.
+
+## Installation
 
 - Original Go implementation: [BambooEngine/bamboo-core](https://github.com/BambooEngine/bamboo-core)
 - Credits: Trung Ngo (bogo.js), Tran Ky Nam (GoTiengViet)

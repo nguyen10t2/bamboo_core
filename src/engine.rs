@@ -4,11 +4,15 @@ use crate::config::Config;
 use crate::input_method::{InputMethod, Rule};
 use crate::mode::{Mode, OutputOptions};
 
+/// Represents a single keypress or a transformation derived from it.
 #[derive(Clone, Debug)]
 pub struct Transformation {
+    /// The rule that triggered this transformation.
     pub rule: Rule,
-    /// Index of an earlier transformation in the same composition.
+    /// Index of an earlier transformation in the same composition that this rule modifies.
+    /// (e.g., a tone mark rule targeting a vowel).
     pub target: Option<usize>,
+    /// Whether the original key was upper case.
     pub is_upper_case: bool,
 }
 
@@ -34,6 +38,10 @@ fn uoh_tail_match(s: &str) -> bool {
     false
 }
 
+/// The main entry point for the Vietnamese Input Method Engine.
+///
+/// `Engine` maintains an internal buffer of [`Transformation`]s. It processes input
+/// keys and applies rules defined by an [`InputMethod`].
 pub struct Engine {
     composition: Vec<Transformation>,
     input_method: InputMethod,
@@ -45,10 +53,12 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Creates a new engine with the given [`InputMethod`] and default [`Config`].
     pub fn new(input_method: InputMethod) -> Self {
         Self::with_config(input_method, Config::default())
     }
 
+    /// Creates a new engine with a specific [`InputMethod`] and [`Config`].
     pub fn with_config(input_method: InputMethod, config: Config) -> Self {
         let mut ascii_rules_by_key: [Vec<Rule>; 128] =
             array::from_fn(|_| Vec::new());
@@ -267,10 +277,12 @@ impl Engine {
         previous
     }
 
+    /// Processes a string of characters and returns the current output.
     pub fn process(&mut self, s: &str, mode: Mode) -> String {
         self.process_str(s, mode).output()
     }
 
+    /// Processes a string of characters and returns a reference to the engine for chaining.
     pub fn process_str(&mut self, s: &str, mode: Mode) -> &Self {
         for key in s.chars() {
             self.process_key(key, mode);
@@ -278,6 +290,7 @@ impl Engine {
         self
     }
 
+    /// Processes a single character key.
     pub fn process_key(&mut self, key: char, mode: Mode) {
         let lower_key = lower(key);
         let is_upper_case = is_upper(key);
@@ -296,10 +309,12 @@ impl Engine {
             self.new_composition(current, lower_key, is_upper_case);
     }
 
+    /// Returns the current processed Vietnamese string.
     pub fn output(&self) -> String {
         self.get_processed_str(OutputOptions::NONE)
     }
 
+    /// Returns the processed string with specific [`OutputOptions`].
     pub fn get_processed_str(&self, options: OutputOptions) -> String {
         if options.contains(OutputOptions::FULL_TEXT) {
             return crate::flattener::flatten_slice(&self.composition, options);
@@ -381,6 +396,7 @@ impl Engine {
         self.composition = previous;
     }
 
+    /// Restores the last word to its raw input or re-processes it.
     pub fn restore_last_word(&mut self, to_vietnamese: bool) {
         let (previous_slice, _last_refs) =
             crate::bamboo_util::extract_last_word(
@@ -416,6 +432,7 @@ impl Engine {
         self.composition = previous;
     }
 
+    /// Resets the engine, clearing all internal composition state.
     pub fn reset(&mut self) {
         self.composition.clear();
     }

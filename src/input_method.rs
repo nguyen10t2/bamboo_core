@@ -3,6 +3,7 @@ use phf::{Map, phf_map};
 use crate::input_method_def::InputMethodDef;
 use crate::utils::{add_mark_to_toneless_char, add_tone_to_char, is_vowel};
 
+/// Represents a Vietnamese tone mark.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
@@ -14,24 +15,30 @@ pub enum Tone {
     Dot = 5,
 }
 
+/// Represents a Vietnamese diacritic mark (marks that change the vowel/consonant).
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mark {
     None = 0,
-    Hat = 1,
-    Breve = 2,
-    Horn = 3,
-    Dash = 4,
+    Hat = 1,   // â, ê, ô
+    Breve = 2, // ă
+    Horn = 3,  // ư, ơ
+    Dash = 4,  // đ
     /// Not used by the current DSL, kept for parity with other ports.
     Raw = 5,
 }
 
+/// The type of transformation a rule applies.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EffectType {
+    /// Appends a character (standard typing).
     Appending = 0,
+    /// Adds/changes a diacritic mark (e.g., a -> ă).
     MarkTransformation = 1,
+    /// Adds/changes a tone mark (e.g., a -> á).
     ToneTransformation = 2,
+    /// Replaces a character with another.
     Replacing = 3,
 }
 
@@ -90,6 +97,10 @@ impl Rule {
     }
 }
 
+/// A collection of rules defining how keys transform text.
+///
+/// Use the provided static methods (e.g., [`InputMethod::telex()`]) to get
+/// standard Vietnamese input methods.
 #[derive(Clone, Debug, Default)]
 pub struct InputMethod {
     pub name: String,
@@ -101,38 +112,47 @@ pub struct InputMethod {
 }
 
 impl InputMethod {
+    /// Standard Telex input method.
     pub fn telex() -> Self {
         parse_input_method("Telex")
     }
 
+    /// Standard VNI input method (using number keys).
     pub fn vni() -> Self {
         parse_input_method("VNI")
     }
 
+    /// Standard VIQR input method.
     pub fn viqr() -> Self {
         parse_input_method("VIQR")
     }
 
+    /// Microsoft Standard Vietnamese keyboard layout.
     pub fn microsoft_layout() -> Self {
         parse_input_method("Microsoft layout")
     }
 
+    /// Telex variant that also supports `[` and `]` keys.
     pub fn telex_2() -> Self {
         parse_input_method("Telex 2")
     }
 
+    /// Combined Telex and VNI.
     pub fn telex_vni() -> Self {
         parse_input_method("Telex + VNI")
     }
 
+    /// Combined Telex, VNI, and VIQR.
     pub fn telex_vni_viqr() -> Self {
         parse_input_method("Telex + VNI + VIQR")
     }
 
+    /// VNI for French keyboard layouts.
     pub fn vni_french_layout() -> Self {
         parse_input_method("VNI Bàn phím tiếng Pháp")
     }
 
+    /// Telex variant using `w` for marks and `z` for tone removal.
     pub fn telex_w() -> Self {
         parse_input_method("Telex W")
     }
