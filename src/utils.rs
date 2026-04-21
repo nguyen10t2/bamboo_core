@@ -112,11 +112,13 @@ pub fn is_vietnamese_rune(c: char) -> bool {
     find_tone_from_char(c) != 0 || c != add_mark_to_toneless_char(c, 0)
 }
 
+#[allow(unused)]
 pub fn has_any_vietnamese_rune(word: &str) -> bool {
     word.chars()
         .any(|c| is_vietnamese_rune(c.to_lowercase().next().unwrap_or(c)))
 }
 
+#[allow(unused)]
 pub fn has_any_vietnamese_vowel(word: &str) -> bool {
     word.chars().any(|c| is_vowel(c.to_lowercase().next().unwrap_or(c)))
 }

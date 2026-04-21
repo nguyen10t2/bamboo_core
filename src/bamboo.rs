@@ -84,6 +84,7 @@ pub struct BambooEngine {
     flags: u32,
 }
 
+#[allow(unused)]
 pub fn new_engine(input_method: InputMethod, flags: u32) -> BambooEngine {
     BambooEngine::new(input_method, flags)
 }

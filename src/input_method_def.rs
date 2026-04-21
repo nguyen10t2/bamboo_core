@@ -189,6 +189,7 @@ pub fn get_input_method_definitions()
     &INPUT_METHOD_DEFS
 }
 
+#[allow(unused)]
 pub fn lookup_key(method: &str, key: &str) -> Option<&'static str> {
     INPUT_METHOD_DEFS.get(method).and_then(|m| m.get(key)).copied()
 }

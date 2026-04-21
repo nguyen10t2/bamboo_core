@@ -6,7 +6,7 @@
 //! # Quick Start
 //!
 //! ```
-//! use bamboo_core_rust::{Engine, Mode, BambooEngine, ESTD_FLAGS, parse_input_method};
+//! use bamboo_core::{Engine, Mode, BambooEngine, ESTD_FLAGS, parse_input_method};
 //!
 //! // Create an engine with Telex input method
 //! let im = parse_input_method("Telex");
@@ -42,9 +42,15 @@ mod spelling;
 mod utils;
 
 // Re-export public types at the crate root
-pub use bamboo::{Engine, BambooEngine, Mode, ESTD_FLAGS};
-pub use bamboo::{VIETNAMESE_MODE, ENGLISH_MODE, TONE_LESS, MARK_LESS, LOWER_CASE, FULL_TEXT, PUNCTUATION_MODE, IN_REVERSE_ORDER};
-pub use charset_def::{get_charset_definitions, get_charset_definition};
+pub use bamboo::{BambooEngine, ESTD_FLAGS, Engine, Mode};
+pub use bamboo::{
+    ENGLISH_MODE, FULL_TEXT, IN_REVERSE_ORDER, LOWER_CASE, MARK_LESS,
+    PUNCTUATION_MODE, TONE_LESS, VIETNAMESE_MODE,
+};
+pub use charset_def::{get_charset_definition, get_charset_definitions};
 pub use encoder::{encode, get_charset_names};
 pub use input_method_def::{get_input_method, get_input_method_definitions};
-pub use rules_parser::{InputMethod, Rule, EffectType, Mark, Tone, parse_input_method, parse_rules, parse_toneless_rules};
+pub use rules_parser::{
+    EffectType, InputMethod, Mark, Rule, Tone, parse_input_method, parse_rules,
+    parse_toneless_rules,
+};
