@@ -3,6 +3,14 @@ name = "bamboo_core_rust"
 version = "0.1.0"
 edition = "2024"
 
+description = "Vietnamese input method engine written in Rust"
+license = "MIT"
+repository = "https://github.com/yourname/bamboo_core_rust"
+readme = "README.md"
+
+keywords = ["vietnamese", "input-method", "telex", "unicode"]
+categories = ["text-processing"]
+
 [dependencies]
 bitflags = "2.11.1"
 phf = { version = "0.13.1", features = ["macros"] }
