@@ -61,7 +61,7 @@ pub struct Rule {
     pub effect_type: EffectType,
     pub effect_on: char,
     pub result: char,
-    pub appended_rules: Vec<Rule>,
+    pub appended_rules: Box<[Rule]>,
 }
 
 impl Rule {
@@ -221,7 +221,7 @@ pub(crate) fn parse_rules(key: char, line: &str) -> Vec<Rule> {
             effect: tone as u8,
             effect_on: '\0',
             result: '\0',
-            appended_rules: Vec::new(),
+            appended_rules: Box::default(),
         }];
     }
 
@@ -277,7 +277,7 @@ fn parse_toneless_rule(
                 effect: 0,
                 effect_on: result,
                 result: effective_on,
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             });
             continue;
         }
@@ -290,7 +290,7 @@ fn parse_toneless_rule(
                     effect_on: add_tone_to_char(chr, tone),
                     effect: effect as u8,
                     result: add_tone_to_char(result, tone),
-                    appended_rules: Vec::new(),
+                    appended_rules: Box::default(),
                 });
             }
         } else {
@@ -300,7 +300,7 @@ fn parse_toneless_rule(
                 effect_on: chr,
                 effect: effect as u8,
                 result,
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             });
         }
     }
@@ -356,27 +356,26 @@ fn get_appending_rule(key: char, value: &str) -> Option<Rule> {
 
     let first = *letters.first()?;
 
-    let mut rule = Rule {
-        key,
-        effect_type: EffectType::Appending,
-        effect: 0,
-        effect_on: first,
-        result: first,
-        appended_rules: Vec::new(),
-    };
-
+    let mut appended_rules = Vec::new();
     for &ch in letters.iter().skip(1) {
-        rule.appended_rules.push(Rule {
+        appended_rules.push(Rule {
             key,
             effect_type: EffectType::Appending,
             effect: 0,
             effect_on: ch,
             result: ch,
-            appended_rules: Vec::new(),
+            appended_rules: Box::default(),
         });
     }
 
-    Some(rule)
+    Some(Rule {
+        key,
+        effect_type: EffectType::Appending,
+        effect: 0,
+        effect_on: first,
+        result: first,
+        appended_rules: appended_rules.into_boxed_slice(),
+    })
 }
 
 fn get_mark_family(c: char) -> Vec<char> {

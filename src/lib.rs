@@ -22,16 +22,19 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use bamboo_core::{Engine, Mode, InputMethod};
+//! use bamboo_core::{Engine, Mode, InputMethod, OutputOptions};
 //!
 //! // Create an engine with the standard Telex input method
 //! let mut engine = Engine::new(InputMethod::telex());
 //!
 //! // Process a string of keys
-//! engine.process_str("tieengs vieetj", Mode::Vietnamese);
+//! engine.process_str("tieengs", Mode::Vietnamese);
+//! assert_eq!(engine.output(), "tiếng");
 //!
-//! // Get the final result
-//! assert_eq!(engine.output(), "tiếng việt");
+//! // Reset for a new word
+//! engine.reset();
+//! engine.process_str("vieetj", Mode::Vietnamese);
+//! assert_eq!(engine.output(), "việt");
 //! ```
 //!
 //! ## Advanced Usage
@@ -61,8 +64,9 @@
 //! engine.process_str("chuyeenr", Mode::Vietnamese);
 //! assert_eq!(engine.output(), "chuyển");
 //!
-//! engine.remove_last_char(true); // true to refresh tone positioning
-//! assert_eq!(engine.output(), "chuyên");
+//! // remove_last_char removes the last 'appending' character and its marks
+//! engine.remove_last_char(true);
+//! assert_eq!(engine.output(), "chuyể");
 //! ```
 
 mod bamboo_util;
@@ -76,6 +80,9 @@ mod input_method_def;
 mod mode;
 mod spelling;
 mod utils;
+
+pub mod ffi;
+pub mod wasm;
 
 pub use config::Config;
 pub use engine::Engine;

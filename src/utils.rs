@@ -1,4 +1,4 @@
-use phf::{Set, phf_map, phf_set};
+use phf::{Map, Set, phf_map, phf_set};
 
 pub const VOWELS: &[char] = &[
     'a', 'à', 'á', 'ả', 'ã', 'ạ', 'ă', 'ằ', 'ắ', 'ẳ', 'ẵ', 'ặ', 'â', 'ầ', 'ấ',
@@ -8,7 +8,15 @@ pub const VOWELS: &[char] = &[
     'ư', 'ừ', 'ứ', 'ử', 'ữ', 'ự', 'y', 'ỳ', 'ý', 'ỷ', 'ỹ', 'ỵ',
 ];
 
-static VOWEL_INDEX: phf::Map<char, usize> = phf_map! {
+static VOWELS_SET: Set<char> = phf_set! {
+    'a', 'à', 'á', 'ả', 'ã', 'ạ', 'ă', 'ằ', 'ắ', 'ẳ', 'ẵ', 'ặ', 'â', 'ầ', 'ấ',
+    'ẩ', 'ẫ', 'ậ', 'e', 'è', 'é', 'ẻ', 'ẽ', 'ẹ', 'ê', 'ề', 'ế', 'ể', 'ễ', 'ệ',
+    'i', 'ì', 'í', 'ỉ', 'ĩ', 'ị', 'o', 'ò', 'ó', 'ỏ', 'õ', 'ọ', 'ô', 'ồ', 'ố',
+    'ổ', 'ỗ', 'ộ', 'ơ', 'ờ', 'ớ', 'ở', 'ỡ', 'ợ', 'u', 'ù', 'ú', 'ủ', 'ũ', 'ụ',
+    'ư', 'ừ', 'ứ', 'ử', 'ữ', 'ự', 'y', 'ỳ', 'ý', 'ỷ', 'ỹ', 'ỵ',
+};
+
+static VOWEL_INDEX: Map<char, usize> = phf_map! {
     'a'=>0,'à'=>1,'á'=>2,'ả'=>3,'ã'=>4,'ạ'=>5,
     'ă'=>6,'ằ'=>7,'ắ'=>8,'ẳ'=>9,'ẵ'=>10,'ặ'=>11,
     'â'=>12,'ầ'=>13,'ấ'=>14,'ẩ'=>15,'ẫ'=>16,'ậ'=>17,
@@ -30,7 +38,7 @@ static PUNCTUATION: Set<char> = phf_set! {
     '|',
 };
 
-static MARKS_MAPS: phf::Map<char, [char; 5]> = phf_map! {
+static MARKS_MAPS: Map<char, [char; 5]> = phf_map! {
     'a' => ['a','â','ă','_','_'],
     'â' => ['a','â','ă','_','_'],
     'ă' => ['a','â','ă','_','_'],
@@ -66,7 +74,7 @@ pub fn is_word_break_symbol(c: char) -> bool {
 
 #[inline]
 pub fn is_vowel(c: char) -> bool {
-    VOWELS.contains(&c)
+    VOWELS_SET.contains(&c)
 }
 
 #[inline]
@@ -79,10 +87,12 @@ fn find_vowel_position(c: char) -> Option<usize> {
     VOWEL_INDEX.get(&c).copied()
 }
 
+#[inline]
 fn find_tone_from_char(c: char) -> u8 {
     find_vowel_position(c).map(|pos| (pos % 6) as u8).unwrap_or(0)
 }
 
+#[inline]
 pub fn add_tone_to_char(c: char, tone: u8) -> char {
     find_vowel_position(c)
         .and_then(|pos| {
@@ -92,6 +102,7 @@ pub fn add_tone_to_char(c: char, tone: u8) -> char {
         .unwrap_or(c)
 }
 
+#[inline]
 pub fn add_mark_to_toneless_char(c: char, mark: u8) -> char {
     MARKS_MAPS
         .get(&c)
@@ -101,6 +112,7 @@ pub fn add_mark_to_toneless_char(c: char, mark: u8) -> char {
         .unwrap_or(c)
 }
 
+#[inline]
 pub fn add_mark_to_char(c: char, mark: u8) -> char {
     let tone = find_tone_from_char(c);
     let base = add_tone_to_char(c, 0);
@@ -108,17 +120,31 @@ pub fn add_mark_to_char(c: char, mark: u8) -> char {
     add_tone_to_char(marked, tone)
 }
 
+#[inline]
 pub fn is_vietnamese_rune(c: char) -> bool {
     find_tone_from_char(c) != 0 || c != add_mark_to_toneless_char(c, 0)
 }
 
 #[allow(unused)]
+#[inline]
 pub fn has_any_vietnamese_rune(word: &str) -> bool {
-    word.chars()
-        .any(|c| is_vietnamese_rune(c.to_lowercase().next().unwrap_or(c)))
+    word.chars().any(|c| {
+        is_vietnamese_rune(if c.is_ascii() {
+            c.to_ascii_lowercase()
+        } else {
+            c.to_lowercase().next().unwrap_or(c)
+        })
+    })
 }
 
 #[allow(unused)]
+#[inline]
 pub fn has_any_vietnamese_vowel(word: &str) -> bool {
-    word.chars().any(|c| is_vowel(c.to_lowercase().next().unwrap_or(c)))
+    word.chars().any(|c| {
+        is_vowel(if c.is_ascii() {
+            c.to_ascii_lowercase()
+        } else {
+            c.to_lowercase().next().unwrap_or(c)
+        })
+    })
 }

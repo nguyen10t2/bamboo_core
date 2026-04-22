@@ -1,19 +1,64 @@
 # Bamboo Core Rust
 
-A Rust port of the Bamboo Vietnamese input method editor library.
+[![Crates.io](https://img.shields.io/crates/v/bamboo-core.svg)](https://crates.io/crates/bamboo-core)
+[![Documentation](https://docs.rs/bamboo-core/badge.svg)](https://docs.rs/bamboo-core)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+A high-performance, $O(1)$ scaling Vietnamese input method engine (IME) core, ported from the original [bamboo-core](https://github.com/BambooEngine/bamboo-core) in Go.
 
 ## Overview
 
-This is a rewrite of the original [bamboo-core](https://github.com/BambooEngine/bamboo-core) library in Go, ported to Rust for improved performance and memory safety.
+Bamboo Core Rust is a complete rewrite of the original library, optimized for maximum performance, memory safety, and cross-platform scalability. It is designed to be the foundational engine for modern Vietnamese IMEs on Linux, Windows, macOS, and the Web.
 
-## Original Authors
+## Key Features (v0.2.0)
+
+- **Syllable-Based Processing:** Performance remains constant ($O(1)$) regardless of document length.
+- **Zero Heap Allocations:** Core typing logic uses a stack-based active buffer, eliminating garbage collection pauses and allocator overhead.
+- **Rule-Based Flexibility:** Supports all major input methods (Telex, VNI, VIQR) via a highly optimized rule engine.
+- **Multi-Platform:**
+  - **Rust API:** For native Rust applications.
+  - **C-FFI:** Stable C-compatible interface for integration with C++, Python, and native IME frameworks (Fcitx5, IBus).
+  - **WebAssembly (WASM):** Built-in support for browser-based editors and extensions.
+
+## Performance (Benchmark)
+
+Comparison against the original Go implementation using complex Vietnamese sentences.
+
+| Implementation | Time/Op (Lower is better) | Speedup | Memory Allocations | Complexity |
+| :--- | :--- | :--- | :--- | :--- |
+| **Go (Original)** | ~6196 µs | 1.00x | ~24,000+ allocs | $O(N^2)$ |
+| **Rust (v0.2.0)** | **~1385 µs** | **~4.50x** | **Zero (during typing)** | **$O(1)$** |
+
+*Environment: Intel(R) Core(TM) i7-7500U CPU @ 2.70GHz, Linux. Optimized with LTO and native CPU flags.*
+
+## Quick Start
+
+### Rust
+Add this to your `Cargo.toml`:
+```toml
+[dependencies]
+bamboo-core = "0.2.0"
+```
+
+```rust
+use bamboo_core::{Engine, Mode, InputMethod};
+
+let mut engine = Engine::new(InputMethod::telex());
+engine.process_str("tieengs vieetj", Mode::Vietnamese);
+
+assert_eq!(engine.output(), "việt"); // engine.output() returns the active word
+```
+
+### WebAssembly
+Enable the `wasm` feature:
+```bash
+wasm-pack build --scope myorg -- --features wasm
+```
+
+## Credits
 
 - **Luong Thanh Lam** <ltlam93@gmail.com> - Original author of bamboo-core (Go version)
-- **The Little Waltz** <goatastronaut0212@outlook.com> - Previous maintainer of bamboo-core (Go version)
-
-## Rust Port Author
-
-- **nguien** <nguyen10t2lhp@gmail.com>
+- **nguien** - Rust port and optimization author
 
 ## License
 
@@ -22,43 +67,4 @@ The MIT License (MIT)
 Copyright (C) 2018 Luong Thanh Lam  
 Copyright (C) 2024 nguien
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-## Performance (Benchmark)
-
-Bamboo Core Rust is designed for high-performance and low-latency text processing. Below is a comparison between the original Go implementation and this Rust port.
-
-### Benchmark Results (Telex)
-
-| Implementation | Time/Op (Lower is better) | Speedup | Memory Allocations |
-| :--- | :--- | :--- | :--- |
-| **Go** | ~5818 µs | 1.00x | ~910 KB/op (24,178 allocs) |
-| **Rust** | **~2139 µs** | **2.72x** | **Zero-allocation** |
-
-*Environment: Intel(R) Core(TM) i7-7500U CPU @ 2.70GHz, Linux. Optimized with LTO and target-cpu=native.*
-
-### Why Rust is faster?
-- **No Garbage Collection:** Eliminates pauses and overhead associated with Go's GC.
-- **Efficient Memory Layout:** Uses stack-allocated structs for transformations instead of heap-allocated pointers.
-- **Link-Time Optimization (LTO):** Deep compiler optimizations across crate boundaries.
-
-## Installation
-
-- Original Go implementation: [BambooEngine/bamboo-core](https://github.com/BambooEngine/bamboo-core)
-- Credits: Trung Ngo (bogo.js), Tran Ky Nam (GoTiengViet)
+See [LICENSE](LICENSE) for full details.

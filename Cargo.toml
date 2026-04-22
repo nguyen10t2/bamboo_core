@@ -1,6 +1,6 @@
 [package]
 name = "bamboo-core"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 
 description = "Vietnamese input method engine written in Rust"
@@ -23,3 +23,8 @@ include = [
 [dependencies]
 bitflags = "2.11.1"
 phf = { version = "0.13.1", features = ["macros"] }
+wasm-bindgen = { version = "0.2", optional = true }
+
+[features]
+default = []
+wasm = ["wasm-bindgen"]

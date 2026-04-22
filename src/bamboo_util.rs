@@ -1,25 +1,42 @@
 use crate::engine::Transformation;
-use crate::flattener::{first_canvas_char_in_suffix, flatten};
+use crate::flattener::flatten;
 use crate::input_method::{EffectType, Mark, Rule, Tone};
 use crate::mode::OutputOptions;
 use crate::spelling::is_valid_cvc;
-use crate::utils::{add_tone_to_char, is_alpha, is_space, is_vowel};
+use crate::utils::{
+    add_mark_to_char, add_tone_to_char, is_alpha, is_space, is_vowel,
+};
 
-const EFREE_TONE_MARKING: u32 = 1 << 0;
-const ESTD_TONE_STYLE: u32 = 1 << 1;
+pub(crate) const EFREE_TONE_MARKING: u32 = 1 << 0;
+pub(crate) const ESTD_TONE_STYLE: u32 = 1 << 1;
 
 #[inline]
 fn lower(c: char) -> char {
-    c.to_lowercase().next().unwrap_or(c)
+    if c.is_ascii() {
+        c.to_ascii_lowercase()
+    } else {
+        c.to_lowercase().next().unwrap_or(c)
+    }
 }
 
 #[inline]
 fn is_upper(c: char) -> bool {
-    lower(c) != c
+    if c.is_ascii() { c.is_ascii_uppercase() } else { lower(c) != c }
 }
 
 fn in_key_list(keys: Option<&[char]>, key: char) -> bool {
     keys.map(|ks| ks.contains(&key)).unwrap_or(false)
+}
+
+pub(crate) fn find_last_appending_trans_idx(
+    composition: &[Transformation],
+) -> Option<usize> {
+    composition
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, trans)| trans.rule.effect_type == EffectType::Appending)
+        .map(|(idx, _)| idx)
 }
 
 pub(crate) fn find_last_appending_trans<'a>(
@@ -30,6 +47,32 @@ pub(crate) fn find_last_appending_trans<'a>(
         .rev()
         .copied()
         .find(|trans| trans.rule.effect_type == EffectType::Appending)
+}
+
+pub(crate) fn extract_last_syllable<'a>(
+    composition: &'a [Transformation],
+    _keys: Option<&[char]>,
+) -> (Vec<&'a Transformation>, Vec<&'a Transformation>) {
+    let mut idx = composition.len();
+    let mut last_is_vowel = false;
+    let mut found_vowel = false;
+
+    while idx > 0 {
+        let tmp = &composition[idx - 1];
+        if tmp.target.is_none() {
+            let is_v = is_vowel(tmp.rule.result);
+            if found_vowel && !is_v && !last_is_vowel {
+                break;
+            }
+            if is_v {
+                found_vowel = true;
+            }
+            last_is_vowel = is_v;
+        }
+        idx -= 1;
+    }
+
+    (composition[..idx].iter().collect(), composition[idx..].iter().collect())
 }
 
 pub(crate) fn new_appending_trans(
@@ -45,7 +88,7 @@ pub(crate) fn new_appending_trans(
             effect: 0,
             effect_type: EffectType::Appending,
             result: key,
-            appended_rules: Vec::new(),
+            appended_rules: Box::default(),
         },
     }
 }
@@ -271,7 +314,7 @@ fn is_free(
 fn extract_atomic_trans<'a, 'b>(
     composition: &'b [&'a Transformation],
     last_is_vowel: bool,
-) -> (&'b [&'a Transformation], Vec<&'a Transformation>) {
+) -> (&'b [&'a Transformation], &'b [&'a Transformation]) {
     let mut idx = composition.len();
 
     while idx > 0 {
@@ -283,28 +326,29 @@ fn extract_atomic_trans<'a, 'b>(
         idx -= 1;
     }
 
-    let head = &composition[..idx];
-    let tail = composition[idx..].to_vec();
-    (head, tail)
+    (&composition[..idx], &composition[idx..])
 }
 
-fn extract_cvc_appending_trans<'a>(
-    composition: &[&'a Transformation],
-) -> (Vec<&'a Transformation>, Vec<&'a Transformation>, Vec<&'a Transformation>)
-{
-    let (head, mut last_consonant) = extract_atomic_trans(composition, false);
+fn extract_cvc_appending_trans<'a, 'b>(
+    composition: &'b [&'a Transformation],
+) -> (
+    &'b [&'a Transformation],
+    &'b [&'a Transformation],
+    &'b [&'a Transformation],
+) {
+    let (head, last_consonant) = extract_atomic_trans(composition, false);
     let (first_head, mut vowel) = extract_atomic_trans(head, true);
-    let first_consonant = first_head.to_vec();
+    let mut first_consonant = first_head;
 
-    let mut first_consonant = first_consonant;
+    let mut last_consonant = last_consonant;
 
     if !last_consonant.is_empty()
         && vowel.is_empty()
         && first_consonant.is_empty()
     {
         first_consonant = last_consonant;
-        vowel = Vec::new();
-        last_consonant = Vec::new();
+        vowel = &[];
+        last_consonant = &[];
     }
 
     // gi/qu consonant qualification.
@@ -318,8 +362,8 @@ fn extract_cvc_appending_trans<'a>(
             && first_consonant[0].rule.result == 'q'
             && vowel[0].rule.result == 'u')
     {
-        first_consonant.push(vowel[0]);
-        vowel.remove(0);
+        first_consonant = &composition[..first_consonant.len() + 1];
+        vowel = &vowel[1..];
     }
 
     (first_consonant, vowel, last_consonant)
@@ -329,82 +373,68 @@ fn extract_cvc_trans<'a>(
     composition: &[&'a Transformation],
 ) -> (Vec<&'a Transformation>, Vec<&'a Transformation>, Vec<&'a Transformation>)
 {
-    let mut trans_map: Vec<Vec<&Transformation>> =
-        vec![Vec::new(); composition.len()];
     let mut appending_list: Vec<&Transformation> = Vec::new();
-
     for trans in composition {
         if trans.target.is_none() {
             appending_list.push(*trans);
-        } else if let Some(t) = trans.target
-            && t < trans_map.len()
-        {
-            trans_map[t].push(*trans);
         }
     }
 
-    let (mut fc, mut vo, mut lc) = extract_cvc_appending_trans(&appending_list);
+    let (fc_app, vo_app, lc_app) = extract_cvc_appending_trans(&appending_list);
 
-    let fc_len = fc.len();
-    for i in 0..fc_len {
-        let t = fc[i];
-        if let Some(idx) = idx_of(composition, t)
-            && let Some(list) = trans_map.get(idx)
-        {
-            fc.extend(list.iter().copied());
-        }
-    }
-    let vo_len = vo.len();
-    for i in 0..vo_len {
-        let t = vo[i];
-        if let Some(idx) = idx_of(composition, t)
-            && let Some(list) = trans_map.get(idx)
-        {
-            vo.extend(list.iter().copied());
-        }
-    }
-    let lc_len = lc.len();
-    for i in 0..lc_len {
-        let t = lc[i];
-        if let Some(idx) = idx_of(composition, t)
-            && let Some(list) = trans_map.get(idx)
-        {
-            lc.extend(list.iter().copied());
+    let mut fc = fc_app.to_vec();
+    let mut vo = vo_app.to_vec();
+    let mut lc = lc_app.to_vec();
+
+    // Re-attach effects by scanning composition once
+    for trans in composition {
+        if let Some(target_idx) = trans.target {
+            let target_trans = composition[target_idx];
+            if fc_app.iter().any(|&t| std::ptr::eq(t, target_trans)) {
+                fc.push(trans);
+            } else if vo_app.iter().any(|&t| std::ptr::eq(t, target_trans)) {
+                vo.push(trans);
+            } else if lc_app.iter().any(|&t| std::ptr::eq(t, target_trans)) {
+                lc.push(trans);
+            }
         }
     }
 
     (fc, vo, lc)
 }
 
-pub(crate) fn extract_last_word_with_punctuation_marks<'a>(
-    composition: &'a [Transformation],
+pub(crate) fn extract_last_word_with_punctuation_marks_refs<'a>(
+    composition: &[&'a Transformation],
     _effect_keys: &[char],
-) -> (&'a [Transformation], Vec<&'a Transformation>) {
+) -> (Vec<&'a Transformation>, Vec<&'a Transformation>) {
     for i in (0..composition.len()).rev() {
-        let Some(c) =
-            first_canvas_char_in_suffix(composition, i, OutputOptions::RAW)
-        else {
+        let Some(c) = first_canvas_char_in_suffix_refs(
+            composition,
+            i,
+            OutputOptions::RAW,
+        ) else {
             continue;
         };
         if is_space(c) {
             if i == composition.len() - 1 {
-                return (composition, Vec::new());
+                return (composition.to_vec(), Vec::new());
             }
-            let last: Vec<&Transformation> =
-                composition[i + 1..].iter().collect();
-            return (&composition[..i + 1], last);
+            return (
+                composition[..i + 1].to_vec(),
+                composition[i + 1..].to_vec(),
+            );
         }
     }
 
-    (&[], composition.iter().collect())
+    (Vec::new(), composition.to_vec())
 }
 
 pub(crate) fn extract_last_word<'a>(
-    composition: &'a [Transformation],
+    composition: &[&'a Transformation],
     effect_keys: Option<&[char]>,
-) -> (&'a [Transformation], Vec<&'a Transformation>) {
+) -> (Vec<&'a Transformation>, Vec<&'a Transformation>) {
     for i in (0..composition.len()).rev() {
-        let Some(c) = first_canvas_char_in_suffix(
+        let Some(c) = first_canvas_char_in_suffix_refs(
             composition,
             i,
             OutputOptions::NONE
@@ -416,15 +446,88 @@ pub(crate) fn extract_last_word<'a>(
         };
         if !is_alpha(c) && !in_key_list(effect_keys, c) {
             if i == composition.len() - 1 {
-                return (composition, Vec::new());
+                return (composition.to_vec(), Vec::new());
             }
-            let last: Vec<&Transformation> =
-                composition[i + 1..].iter().collect();
-            return (&composition[..i + 1], last);
+            let prev = composition[..i + 1].to_vec();
+            let last = composition[i + 1..].to_vec();
+            return (prev, last);
         }
     }
 
-    (&[], composition.iter().collect())
+    (Vec::new(), composition.to_vec())
+}
+
+fn first_canvas_char_in_suffix_refs(
+    composition: &[&Transformation],
+    start: usize,
+    options: OutputOptions,
+) -> Option<char> {
+    let mut first: Option<(usize, &Transformation)> = None;
+    for (idx, trans) in composition[start..].iter().enumerate() {
+        let abs_idx = start + idx;
+        if options.contains(OutputOptions::RAW) {
+            if trans.rule.key != '\0' {
+                first = Some((abs_idx, *trans));
+                break;
+            }
+            continue;
+        }
+        if trans.rule.effect_type == EffectType::Appending
+            && trans.rule.key != '\0'
+        {
+            first = Some((abs_idx, *trans));
+            break;
+        }
+    }
+
+    let (target_abs_idx, appending_trans) = first?;
+    let mut chr = if options.contains(OutputOptions::RAW) {
+        appending_trans.rule.key
+    } else {
+        let mut c = appending_trans.rule.effect_on;
+        for trans in &composition[start..] {
+            if trans.target != Some(target_abs_idx) {
+                continue;
+            }
+            match trans.rule.effect_type {
+                EffectType::MarkTransformation => {
+                    if trans.rule.effect == Mark::Raw as u8 {
+                        c = appending_trans.rule.key;
+                    } else {
+                        c = add_mark_to_char(c, trans.rule.effect);
+                    }
+                }
+                EffectType::ToneTransformation => {
+                    c = add_tone_to_char(c, trans.rule.effect);
+                }
+                _ => {}
+            }
+        }
+        c
+    };
+
+    if options.contains(OutputOptions::TONE_LESS) {
+        chr = add_tone_to_char(chr, 0);
+    }
+    if options.contains(OutputOptions::MARK_LESS) {
+        chr = add_mark_to_char(chr, 0);
+    }
+    if options.contains(OutputOptions::LOWER_CASE) {
+        chr = lower(chr);
+    } else if appending_trans.is_upper_case {
+        chr = upper(chr);
+    }
+
+    Some(chr)
+}
+
+#[inline]
+fn upper(c: char) -> char {
+    if c.is_ascii() {
+        c.to_ascii_uppercase()
+    } else {
+        c.to_uppercase().next().unwrap_or(c)
+    }
 }
 
 fn find_mark_target(
@@ -592,7 +695,7 @@ fn generate_undo_transformations(
                     key: '\0',
                     effect_on: '\0',
                     result: '\0',
-                    appended_rules: Vec::new(),
+                    appended_rules: Box::default(),
                 },
             });
         } else if rule.effect_type == EffectType::MarkTransformation {
@@ -613,7 +716,7 @@ fn generate_undo_transformations(
                             effect: 0,
                             effect_on: '\0',
                             result: '\0',
-                            appended_rules: Vec::new(),
+                            appended_rules: Box::default(),
                         },
                     };
 
@@ -641,19 +744,6 @@ fn contains_uho(s: &str) -> bool {
     s.contains("ưo") || s.contains("ươ")
 }
 
-#[allow(unused)]
-fn matches_uoh_tail(s: &str) -> bool {
-    for pat in ["uơ", "ưo"] {
-        if let Some(idx) = s.find(pat) {
-            let after = &s[idx + pat.len()..];
-            if after.chars().next().is_some_and(|c| c.is_alphabetic()) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 pub(crate) fn generate_transformations(
     composition: &[&Transformation],
     applicable_rules: &[Rule],
@@ -677,7 +767,7 @@ pub(crate) fn generate_transformations(
                     key: '\0',
                     effect_on: '\0',
                     result: '\0',
-                    appended_rules: Vec::new(),
+                    appended_rules: Box::default(),
                 },
                 target: Some(composition.len() - 1),
                 is_upper_case: false,
@@ -741,7 +831,7 @@ pub(crate) fn generate_transformations(
                         effect: 0,
                         effect_on: '\0',
                         result: '\0',
-                        appended_rules: Vec::new(),
+                        appended_rules: Box::default(),
                     },
                 };
 
@@ -868,7 +958,7 @@ pub(crate) fn refresh_last_tone_target(
                 effect: Tone::None as u8,
                 effect_on: '\0',
                 result: '\0',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
         });
     }

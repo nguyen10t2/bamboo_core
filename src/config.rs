@@ -20,7 +20,7 @@ impl Config {
         Self::default()
     }
 
-    pub(crate) fn to_flags(&self) -> u32 {
+    pub(crate) fn to_flags(self) -> u32 {
         let mut flags = 0;
         if self.free_tone_marking {
             flags |= 1 << 0;

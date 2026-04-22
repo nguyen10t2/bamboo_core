@@ -1,4 +1,5 @@
 /target
+/docs
 Cargo.lock
 *.rs.bk
 *.log

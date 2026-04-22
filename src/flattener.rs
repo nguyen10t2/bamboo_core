@@ -5,12 +5,20 @@ use crate::utils::{add_mark_to_char, add_tone_to_char};
 
 #[inline]
 fn lower(c: char) -> char {
-    c.to_lowercase().next().unwrap_or(c)
+    if c.is_ascii() {
+        c.to_ascii_lowercase()
+    } else {
+        c.to_lowercase().next().unwrap_or(c)
+    }
 }
 
 #[inline]
 fn upper(c: char) -> char {
-    c.to_uppercase().next().unwrap_or(c)
+    if c.is_ascii() {
+        c.to_ascii_uppercase()
+    } else {
+        c.to_uppercase().next().unwrap_or(c)
+    }
 }
 
 pub fn flatten(
@@ -72,49 +80,62 @@ fn write_canvas_refs(
     options: OutputOptions,
     out: &mut String,
 ) {
-    let mut effects_by_target: Vec<Vec<&Transformation>> =
-        vec![Vec::new(); composition.len()];
-    let mut appending_list: Vec<(usize, &Transformation)> =
-        Vec::with_capacity(estimate_len_refs(composition, options));
+    if composition.is_empty() {
+        return;
+    }
+
+    // linked-list implementation in a flat array to avoid Vec<Vec>
+    // next_effect[i] stores the index of the next transformation targeting the same character
+    let mut next_effect = vec![None; composition.len()];
+    let mut head_effect = vec![None; composition.len()];
+    let mut appending_list = Vec::with_capacity(composition.len());
 
     for (idx, trans) in composition.iter().enumerate() {
-        if options.contains(OutputOptions::RAW) {
-            if trans.rule.key == '\0' {
-                continue; // ignore virtual key in raw output
-            }
-            appending_list.push((idx, *trans));
-        } else if trans.rule.effect_type == EffectType::Appending {
-            if trans.rule.key == '\0' {
-                continue; // ignore virtual appending key
-            }
+        if (options.contains(OutputOptions::RAW)
+            || trans.rule.effect_type == EffectType::Appending)
+            && trans.rule.key != '\0'
+        {
             appending_list.push((idx, *trans));
         } else if let Some(target) = trans.target
-            && target < effects_by_target.len()
+            && target < head_effect.len()
         {
-            effects_by_target[target].push(*trans);
+            next_effect[idx] = head_effect[target];
+            head_effect[target] = Some(idx);
         }
     }
 
-    for (idx, appending_trans) in appending_list {
+    for (abs_idx, appending_trans) in appending_list {
         let mut chr: char;
-        let trans_list: &[&Transformation] =
-            effects_by_target.get(idx).map(Vec::as_slice).unwrap_or(&[]);
-
         if options.contains(OutputOptions::RAW) {
             chr = appending_trans.rule.key;
         } else {
             chr = appending_trans.rule.effect_on;
-            for trans in trans_list {
-                match trans.rule.effect_type {
+            // Iterate through effects targeting this character (in reverse order because of linked list)
+            let mut curr = head_effect[abs_idx];
+            let mut effects = [None; 8]; // Maximum 8 effects per character is plenty
+            let mut count = 0;
+            while let Some(idx) = curr {
+                if count < 8 {
+                    effects[count] = Some(idx);
+                    count += 1;
+                }
+                curr = next_effect[idx];
+            }
+
+            // Apply in original order (effects were added to linked list in original order,
+            // so head_effect points to the LAST effect). We iterate backwards.
+            for i in (0..count).rev() {
+                let t = composition[effects[i].unwrap()];
+                match t.rule.effect_type {
                     EffectType::MarkTransformation => {
-                        if trans.rule.effect == Mark::Raw as u8 {
+                        if t.rule.effect == Mark::Raw as u8 {
                             chr = appending_trans.rule.key;
                         } else {
-                            chr = add_mark_to_char(chr, trans.rule.effect);
+                            chr = add_mark_to_char(chr, t.rule.effect);
                         }
                     }
                     EffectType::ToneTransformation => {
-                        chr = add_tone_to_char(chr, trans.rule.effect);
+                        chr = add_tone_to_char(chr, t.rule.effect);
                     }
                     _ => {}
                 }
@@ -132,7 +153,6 @@ fn write_canvas_refs(
         } else if appending_trans.is_upper_case {
             chr = upper(chr);
         }
-
         out.push(chr);
     }
 }
@@ -142,49 +162,57 @@ fn write_canvas_slice(
     options: OutputOptions,
     out: &mut String,
 ) {
-    let mut effects_by_target: Vec<Vec<&Transformation>> =
-        vec![Vec::new(); composition.len()];
-    let mut appending_list: Vec<(usize, &Transformation)> =
-        Vec::with_capacity(estimate_len_slice(composition, options));
+    if composition.is_empty() {
+        return;
+    }
+
+    let mut next_effect = vec![None; composition.len()];
+    let mut head_effect = vec![None; composition.len()];
+    let mut appending_list = Vec::with_capacity(composition.len());
 
     for (idx, trans) in composition.iter().enumerate() {
-        if options.contains(OutputOptions::RAW) {
-            if trans.rule.key == '\0' {
-                continue; // ignore virtual key in raw output
-            }
-            appending_list.push((idx, trans));
-        } else if trans.rule.effect_type == EffectType::Appending {
-            if trans.rule.key == '\0' {
-                continue; // ignore virtual appending key
-            }
+        if (options.contains(OutputOptions::RAW)
+            || trans.rule.effect_type == EffectType::Appending)
+            && trans.rule.key != '\0'
+        {
             appending_list.push((idx, trans));
         } else if let Some(target) = trans.target
-            && target < effects_by_target.len()
+            && target < head_effect.len()
         {
-            effects_by_target[target].push(trans);
+            next_effect[idx] = head_effect[target];
+            head_effect[target] = Some(idx);
         }
     }
 
-    for (idx, appending_trans) in appending_list {
+    for (abs_idx, appending_trans) in appending_list {
         let mut chr: char;
-        let trans_list: &[&Transformation] =
-            effects_by_target.get(idx).map(Vec::as_slice).unwrap_or(&[]);
-
         if options.contains(OutputOptions::RAW) {
             chr = appending_trans.rule.key;
         } else {
             chr = appending_trans.rule.effect_on;
-            for trans in trans_list {
-                match trans.rule.effect_type {
+            let mut curr = head_effect[abs_idx];
+            let mut effects = [None; 8];
+            let mut count = 0;
+            while let Some(idx) = curr {
+                if count < 8 {
+                    effects[count] = Some(idx);
+                    count += 1;
+                }
+                curr = next_effect[idx];
+            }
+
+            for i in (0..count).rev() {
+                let t = &composition[effects[i].unwrap()];
+                match t.rule.effect_type {
                     EffectType::MarkTransformation => {
-                        if trans.rule.effect == Mark::Raw as u8 {
+                        if t.rule.effect == Mark::Raw as u8 {
                             chr = appending_trans.rule.key;
                         } else {
-                            chr = add_mark_to_char(chr, trans.rule.effect);
+                            chr = add_mark_to_char(chr, t.rule.effect);
                         }
                     }
                     EffectType::ToneTransformation => {
-                        chr = add_tone_to_char(chr, trans.rule.effect);
+                        chr = add_tone_to_char(chr, t.rule.effect);
                     }
                     _ => {}
                 }
@@ -202,11 +230,11 @@ fn write_canvas_slice(
         } else if appending_trans.is_upper_case {
             chr = upper(chr);
         }
-
         out.push(chr);
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn first_canvas_char_in_suffix(
     composition: &[Transformation],
     start: usize,
@@ -285,7 +313,7 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'a',
                 result: 'a',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
             target: None,
             is_upper_case: false,
@@ -297,7 +325,7 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: ' ',
                 result: ' ',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
             target: None,
             is_upper_case: false,
@@ -309,7 +337,7 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'w',
                 result: 'w',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
             target: None,
             is_upper_case: false,
@@ -334,7 +362,7 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'x',
                 result: 'x',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
             target: None,
             is_upper_case: false,
@@ -346,7 +374,7 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'o',
                 result: 'o',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
             target: None,
             is_upper_case: false,
@@ -358,7 +386,7 @@ mod tests {
                 effect_type: EffectType::MarkTransformation,
                 effect_on: 'o',
                 result: 'ô',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
             target: Some(1),
             is_upper_case: false,
@@ -379,7 +407,7 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'o',
                 result: 'o',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
             target: None,
             is_upper_case: false,
@@ -391,7 +419,7 @@ mod tests {
                 effect_type: EffectType::MarkTransformation,
                 effect_on: 'o',
                 result: 'ô',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
             target: Some(0),
             is_upper_case: false,
@@ -403,7 +431,7 @@ mod tests {
                 effect_type: EffectType::ToneTransformation,
                 effect_on: '\0',
                 result: '\0',
-                appended_rules: Vec::new(),
+                appended_rules: Box::default(),
             },
             target: Some(0),
             is_upper_case: false,
