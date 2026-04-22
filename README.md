@@ -1,70 +1,64 @@
-# Bamboo Core Rust
+# Bamboo Core (Rust)
 
-[![Crates.io](https://img.shields.io/crates/v/bamboo-core.svg)](https://crates.io/crates/bamboo-core)
-[![Documentation](https://docs.rs/bamboo-core/badge.svg)](https://docs.rs/bamboo-core)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Rust](https://github.com/BambooEngine/bamboo-core/actions/workflows/rust.yml/badge.svg)](https://github.com/BambooEngine/bamboo-core/actions)
 
-A high-performance, $O(1)$ scaling Vietnamese input method engine (IME) core, ported from the original [bamboo-core](https://github.com/BambooEngine/bamboo-core) in Go.
+Một nhân bộ gõ tiếng Việt (IME Core) hiệu năng cao được viết bằng Rust, kế thừa và tối ưu hóa từ phiên bản [bamboo-core](https://github.com/BambooEngine/bamboo-core) gốc bằng Go.
 
-## Overview
+## 💡 Ý tưởng & Nguồn gốc
 
-Bamboo Core Rust is a complete rewrite of the original library, optimized for maximum performance, memory safety, and cross-platform scalability. It is designed to be the foundational engine for modern Vietnamese IMEs on Linux, Windows, macOS, and the Web.
+Dự án này là bản port sang Rust và tối ưu hóa chuyên sâu của bộ nhân gõ tiếng Việt **Bamboo**, ban đầu được phát triển bởi **Luong Thanh Lam** trên ngôn ngữ Go.
 
-## Key Features (v0.2.0)
+Bamboo ra đời với mục tiêu cung cấp một giải pháp gõ tiếng Việt linh hoạt, dựa trên các **quy tắc biến đổi (rule-based transformations)** thay vì hardcode logic. Ý tưởng này cho phép bộ gõ dễ dàng thích nghi với nhiều kiểu gõ khác nhau và hỗ trợ các tính năng hiện đại như gõ tự do, kiểm tra chính tả thông minh.
 
-- **Syllable-Based Processing:** Performance remains constant ($O(1)$) regardless of document length.
-- **Zero Heap Allocations:** Core typing logic uses a stack-based active buffer, eliminating garbage collection pauses and allocator overhead.
-- **Rule-Based Flexibility:** Supports all major input methods (Telex, VNI, VIQR) via a highly optimized rule engine.
-- **Multi-Platform:**
-  - **Rust API:** For native Rust applications.
-  - **C-FFI:** Stable C-compatible interface for integration with C++, Python, and native IME frameworks (Fcitx5, IBus).
-  - **WebAssembly (WASM):** Built-in support for browser-based editors and extensions.
+Triết lý cốt lõi của dự án được kế thừa và lấy cảm hứng từ:
+- **[bogo.js](https://github.com/lewtds/bogo.js)**: Dự án tiên phong của **Trung Ngo**, giới thiệu mô hình transformation cho bộ gõ tiếng Việt.
+- **GoTiengViet**: Bộ gõ kinh điển của **Tran Ky Nam**, chuẩn mực về sự chính xác và trải nghiệm người dùng.
+- **[NexusKey](https://github.com/phatMT97/NexusKey)**: Các kỹ thuật tối ưu hóa mảng tĩnh và state machine từ nhân gõ của **Mai Thanh Phát**.
 
-## Performance (Benchmark)
+## 🚀 Cải tiến trong phiên bản Rust
 
-Comparison against the original Go implementation using complex Vietnamese sentences.
+Phiên bản Rust này tập trung vào việc đưa hiệu năng lên mức tối đa để có thể chạy mượt mà trên mọi môi trường từ Desktop đến Web (WASM) và Embedded:
+- **Tốc độ vượt trội:** Xử lý một âm tiết phức tạp chỉ trong **~0.47ms**, nhanh hơn đáng kể nhờ chiến lược gõ phím không cấp phát bộ nhớ (Zero-Allocation).
+- **Tối ưu Hybrid:** Kết hợp sự linh hoạt của Rule Engine và tốc độ của Static Lookup Tables.
+- **An toàn:** Đảm bảo tính đúng đắn của dữ liệu Unicode thông qua hệ thống kiểu mạnh của Rust.
 
-| Implementation | Time/Op (Lower is better) | Speedup | Memory Allocations | Complexity |
-| :--- | :--- | :--- | :--- | :--- |
-| **Go (Original)** | ~6196 µs | 1.00x | ~24,000+ allocs | $O(N^2)$ |
-| **Rust (v0.2.0)** | **~1385 µs** | **~4.50x** | **Zero (during typing)** | **$O(1)$** |
+## 📦 Cài đặt
 
-*Environment: Intel(R) Core(TM) i7-7500U CPU @ 2.70GHz, Linux. Optimized with LTO and native CPU flags.*
+Thêm vào `Cargo.toml` của bạn:
 
-## Quick Start
-
-### Rust
-Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-bamboo-core = "0.2.0"
+bamboo-core = "0.3.0"
 ```
+
+## 🛠️ Sử dụng nhanh
 
 ```rust
 use bamboo_core::{Engine, Mode, InputMethod};
 
-let mut engine = Engine::new(InputMethod::telex());
-engine.process_str("tieengs vieetj", Mode::Vietnamese);
-
-assert_eq!(engine.output(), "việt"); // engine.output() returns the active word
+fn main() {
+    let mut engine = Engine::new(InputMethod::telex());
+    engine.process_str("tieengs", Mode::Vietnamese);
+    println!("Output: {}", engine.output()); // In ra: "tiếng"
+}
 ```
 
-### WebAssembly
-Enable the `wasm` feature:
-```bash
-wasm-pack build --scope myorg -- --features wasm
+## 🧩 Delta API cho IME
+
+Cung cấp thông tin cần thiết để cập nhật buffer của IME một cách hiệu quả:
+
+```rust
+let (backspaces, _, inserted) = engine.process_key_delta('s', Mode::Vietnamese);
+// Kết quả: backspaces = 1 (xóa 'a'), inserted = "á"
 ```
 
-## Credits
+## 👥 Tác giả & Đóng góp
 
-- **Luong Thanh Lam** <ltlam93@gmail.com> - Original author of bamboo-core (Go version)
-- **nguien** - Rust port and optimization author
+- **Tác giả bản Rust & Tối ưu hóa:** Dao Trong Nguyen ([@nguyen10t2](https://github.com/nguyen10t2))
+- **Tác giả bản gốc (Go):** Luong Thanh Lam ([@lamtq](https://github.com/lamtq))
+- **Tư vấn kỹ thuật & Cảm hứng tối ưu:** Mai Thanh Phát ([@phatMT97](https://github.com/phatMT97)) - Tác giả **NexusKey**.
 
-## License
+## 📜 Giấy phép
 
-The MIT License (MIT)
-
-Copyright (C) 2018 Luong Thanh Lam  
-Copyright (C) 2024 nguien
-
-See [LICENSE](LICENSE) for full details.
+Dự án này được phát hành dưới giấy phép MIT. Xem tệp [LICENSE](LICENSE) để biết thêm chi tiết.
