@@ -1,7 +1,8 @@
 # Bamboo Core (Rust)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Rust](https://github.com/BambooEngine/bamboo-core/actions/workflows/rust.yml/badge.svg)](https://github.com/BambooEngine/bamboo-core/actions)
+[![Crates.io](https://img.shields.io/crates/v/bamboo-core.svg)](https://crates.io/crates/bamboo-core)
+[![Documentation](https://docs.rs/bamboo-core/badge.svg)](https://docs.rs/bamboo-core)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Một nhân bộ gõ tiếng Việt (IME Core) hiệu năng cao được viết bằng Rust, kế thừa và tối ưu hóa từ phiên bản [bamboo-core](https://github.com/BambooEngine/bamboo-core) gốc bằng Go.
 
