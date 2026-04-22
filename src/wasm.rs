@@ -1,6 +1,6 @@
 //! WebAssembly (WASM) bindings for Bamboo Core.
 //!
-//! This module provides a high-level wrapper around the [`Engine`] for use in Web browsers
+//! This module provides a high-level wrapper around the [`crate::Engine`] for use in Web browsers
 //! and other WASM environments via `wasm-bindgen`.
 
 #[cfg(feature = "wasm")]
@@ -19,11 +19,7 @@ impl BambooWasmEngine {
     /// Creates a new engine instance with the default Telex input method.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self {
-            inner: crate::engine::Engine::new(
-                crate::input_method::InputMethod::telex(),
-            ),
-        }
+        Self { inner: crate::engine::Engine::new(crate::input_method::InputMethod::telex()) }
     }
 
     /// Processes a single character and returns the current transformed word.

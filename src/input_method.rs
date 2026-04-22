@@ -41,9 +41,10 @@ pub enum Mark {
 
 /// The type of transformation a rule applies.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EffectType {
     /// Appends a character (standard typing).
+    #[default]
     Appending = 0,
     /// Adds/changes a diacritic mark (e.g., a -> ă).
     MarkTransformation = 1,
@@ -63,7 +64,7 @@ static TONES: Map<&'static str, Tone> = phf_map! {
 };
 
 /// A transformation rule that defines how a key press affects the composition.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rule {
     /// The key that triggers this rule.
     pub key: char,
@@ -77,8 +78,10 @@ pub struct Rule {
     pub effect_on: char,
     /// The resulting character after applying the transformation.
     pub result: char,
-    /// Additional rules to apply immediately after this one (used for multi-character shortcuts).
-    pub appended_rules: Box<[Rule]>,
+    /// Additional characters to append immediately after this one (used for multi-character shortcuts).
+    pub appended: [char; 2],
+    /// Number of characters in `appended`.
+    pub appended_len: u8,
 }
 
 impl Rule {
@@ -188,19 +191,12 @@ impl InputMethod {
 /// Parse a known input method by name from the built-in definitions.
 pub(crate) fn parse_input_method(im_name: &str) -> InputMethod {
     let defs = crate::input_method_def::get_input_method_definitions();
-    defs.get(im_name)
-        .copied()
-        .map(|def| parse_input_method_def(im_name, def))
-        .unwrap_or_default()
+    defs.get(im_name).copied().map(|def| parse_input_method_def(im_name, def)).unwrap_or_default()
 }
 
 /// Parses an input method definition from its structured format.
-pub(crate) fn parse_input_method_def(
-    im_name: &str,
-    im_def: &InputMethodDef,
-) -> InputMethod {
-    let mut im =
-        InputMethod { name: im_name.to_string(), ..Default::default() };
+pub(crate) fn parse_input_method_def(im_name: &str, im_def: &InputMethodDef) -> InputMethod {
+    let mut im = InputMethod { name: im_name.to_string(), ..Default::default() };
 
     for (key_str, line) in im_def.entries() {
         let key = match key_str.chars().next() {
@@ -250,7 +246,8 @@ pub(crate) fn parse_rules(key: char, line: &str) -> Vec<Rule> {
             effect: tone as u8,
             effect_on: '\0',
             result: '\0',
-            appended_rules: Box::default(),
+            appended: ['\0'; 2],
+            appended_len: 0,
         }];
     }
 
@@ -263,18 +260,11 @@ pub(crate) fn parse_toneless_rules(key: char, line: &str) -> Vec<Rule> {
 
     if let Some((effective_ons, results, rest)) = parse_dsl(&lower) {
         let mut rules = Vec::new();
-        for (effective_on, result) in
-            effective_ons.into_iter().zip(results.into_iter())
-        {
+        for (effective_on, result) in effective_ons.into_iter().zip(results.into_iter()) {
             let Some(effect) = find_mark_from_char(result) else {
                 continue;
             };
-            rules.extend(parse_toneless_rule(
-                key,
-                effective_on,
-                result,
-                effect,
-            ));
+            rules.extend(parse_toneless_rule(key, effective_on, result, effect));
         }
 
         if let Some(rule) = get_appending_rule(key, rest) {
@@ -291,12 +281,7 @@ pub(crate) fn parse_toneless_rules(key: char, line: &str) -> Vec<Rule> {
     Vec::new()
 }
 
-fn parse_toneless_rule(
-    key: char,
-    effective_on: char,
-    result: char,
-    effect: Mark,
-) -> Vec<Rule> {
+fn parse_toneless_rule(key: char, effective_on: char, result: char, effect: Mark) -> Vec<Rule> {
     let mut rules = Vec::new();
 
     for chr in get_mark_family(effective_on) {
@@ -307,7 +292,8 @@ fn parse_toneless_rule(
                 effect: 0,
                 effect_on: result,
                 result: effective_on,
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             });
             continue;
         }
@@ -320,7 +306,8 @@ fn parse_toneless_rule(
                     effect_on: add_tone_to_char(chr, tone),
                     effect: effect as u8,
                     result: add_tone_to_char(result, tone),
-                    appended_rules: Box::default(),
+                    appended: ['\0'; 2],
+                    appended_len: 0,
                 });
             }
         } else {
@@ -330,7 +317,8 @@ fn parse_toneless_rule(
                 effect_on: chr,
                 effect: effect as u8,
                 result,
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             });
         }
     }
@@ -386,16 +374,13 @@ fn get_appending_rule(key: char, value: &str) -> Option<Rule> {
 
     let first = *letters.first()?;
 
-    let mut appended_rules = Vec::new();
+    let mut appended = ['\0'; 2];
+    let mut appended_len = 0u8;
     for &ch in letters.iter().skip(1) {
-        appended_rules.push(Rule {
-            key,
-            effect_type: EffectType::Appending,
-            effect: 0,
-            effect_on: ch,
-            result: ch,
-            appended_rules: Box::default(),
-        });
+        if (appended_len as usize) < appended.len() {
+            appended[appended_len as usize] = ch;
+            appended_len += 1;
+        }
     }
 
     Some(Rule {
@@ -404,7 +389,8 @@ fn get_appending_rule(key: char, value: &str) -> Option<Rule> {
         effect: 0,
         effect_on: first,
         result: first,
-        appended_rules: appended_rules.into_boxed_slice(),
+        appended,
+        appended_len,
     })
 }
 
@@ -496,17 +482,15 @@ mod tests {
     fn parse_append_rule() {
         let rules = parse_toneless_rules('[', "__ươ");
         assert_eq!(rules.len(), 1);
-        let append_rules = &rules[0].appended_rules;
-        assert_eq!(append_rules.len(), 1);
-        assert_eq!(append_rules[0].effect_type, EffectType::Appending);
-        assert_eq!(append_rules[0].effect_on, 'ơ');
+        let appended_len = rules[0].appended_len;
+        assert_eq!(appended_len, 1);
+        assert_eq!(rules[0].appended[0], 'ơ');
 
         let rules = parse_toneless_rules('{', "__ƯƠ");
         assert_eq!(rules.len(), 1);
-        let append_rules = &rules[0].appended_rules;
-        assert_eq!(append_rules.len(), 1);
-        assert_eq!(append_rules[0].effect_type, EffectType::Appending);
-        assert_eq!(append_rules[0].effect_on, 'Ơ');
+        let appended_len = rules[0].appended_len;
+        assert_eq!(appended_len, 1);
+        assert_eq!(rules[0].appended[0], 'Ơ');
     }
 
     #[test]
@@ -531,11 +515,8 @@ mod tests {
     #[test]
     fn telex2_has_no_appending_rule_for_o() {
         let im = parse_input_method("Telex 2");
-        let o_rules: Vec<_> =
-            im.rules.iter().filter(|r| r.key == 'o').collect();
+        let o_rules: Vec<_> = im.rules.iter().filter(|r| r.key == 'o').collect();
         assert!(!o_rules.is_empty());
-        assert!(
-            !o_rules.iter().any(|r| r.effect_type == EffectType::Appending)
-        );
+        assert!(!o_rules.iter().any(|r| r.effect_type == EffectType::Appending));
     }
 }

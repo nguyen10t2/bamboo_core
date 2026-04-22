@@ -1,215 +1,92 @@
+//! Functions for converting a sequence of transformations into a final string.
+
 use crate::engine::Transformation;
 use crate::input_method::{EffectType, Mark};
 use crate::mode::OutputOptions;
 use crate::utils::{add_mark_to_char, add_tone_to_char};
 
+const MAX_COMPOSITION: usize = 32;
+
 #[inline]
 fn lower(c: char) -> char {
-    if c.is_ascii() {
-        c.to_ascii_lowercase()
-    } else {
-        c.to_lowercase().next().unwrap_or(c)
-    }
+    if c.is_ascii() { c.to_ascii_lowercase() } else { c.to_lowercase().next().unwrap_or(c) }
 }
 
 #[inline]
 fn upper(c: char) -> char {
-    if c.is_ascii() {
-        c.to_ascii_uppercase()
-    } else {
-        c.to_uppercase().next().unwrap_or(c)
-    }
+    if c.is_ascii() { c.to_ascii_uppercase() } else { c.to_uppercase().next().unwrap_or(c) }
 }
 
-/// Flattens a composition of transformation references into a single string.
-///
-/// # Arguments
-///
-/// * `composition` - A slice of references to [`Transformation`] objects.
-/// * `options` - [`OutputOptions`] to customize the resulting string.
-///
-/// # Returns
-///
-/// A `String` representing the processed text.
-pub fn flatten(
-    composition: &[&Transformation],
-    options: OutputOptions,
-) -> String {
-    let mut out =
-        String::with_capacity(estimate_len_refs(composition, options));
-    write_canvas_refs(composition, options, &mut out);
-    out
-}
-
-/// Flattens a slice of transformation objects into a single string.
-///
-/// # Arguments
-///
-/// * `composition` - A slice of [`Transformation`] objects.
-/// * `options` - [`OutputOptions`] to customize the resulting string.
-///
-/// # Returns
-///
-/// A `String` representing the processed text.
-pub(crate) fn flatten_slice(
-    composition: &[Transformation],
-    options: OutputOptions,
-) -> String {
-    let mut out =
-        String::with_capacity(estimate_len_slice(composition, options));
+/// Converts a slice of transformations into a string based on the provided options.
+pub(crate) fn flatten_slice(composition: &[Transformation], options: OutputOptions) -> String {
+    let mut out = String::with_capacity(estimate_cap_bytes_slice(composition, options));
     write_canvas_slice(composition, options, &mut out);
     out
 }
 
-fn estimate_len_refs(
-    composition: &[&Transformation],
-    options: OutputOptions,
-) -> usize {
-    if options.contains(OutputOptions::RAW) {
-        composition.iter().filter(|t| t.rule.key != '\0').count()
-    } else {
-        composition
-            .iter()
-            .filter(|t| {
-                t.rule.effect_type == EffectType::Appending
-                    && t.rule.key != '\0'
-            })
-            .count()
-    }
-}
-
-fn estimate_len_slice(
+/// Similar to [`flatten_slice`], but writes the result into an existing string buffer.
+pub(crate) fn flatten_slice_into(
     composition: &[Transformation],
-    options: OutputOptions,
-) -> usize {
-    if options.contains(OutputOptions::RAW) {
-        composition.iter().filter(|t| t.rule.key != '\0').count()
-    } else {
-        composition
-            .iter()
-            .filter(|t| {
-                t.rule.effect_type == EffectType::Appending
-                    && t.rule.key != '\0'
-            })
-            .count()
-    }
-}
-
-fn write_canvas_refs(
-    composition: &[&Transformation],
     options: OutputOptions,
     out: &mut String,
 ) {
+    out.clear();
+    out.reserve(estimate_cap_bytes_slice(composition, options));
+    write_canvas_slice(composition, options, out);
+}
+
+#[inline]
+fn estimate_cap_bytes_slice(composition: &[Transformation], options: OutputOptions) -> usize {
+    let char_count = if options.contains(OutputOptions::RAW) {
+        composition.iter().filter(|t| t.rule.key != '\0').count()
+    } else {
+        composition
+            .iter()
+            .filter(|t| t.rule.effect_type == EffectType::Appending && t.rule.key != '\0')
+            .count()
+    };
+    char_count * 4
+}
+
+fn write_canvas_slice(composition: &[Transformation], options: OutputOptions, out: &mut String) {
     if composition.is_empty() {
         return;
     }
 
-    // linked-list implementation in a flat array to avoid Vec<Vec>
-    // next_effect[i] stores the index of the next transformation targeting the same character
-    let mut next_effect = vec![None; composition.len()];
-    let mut head_effect = vec![None; composition.len()];
-    let mut appending_list = Vec::with_capacity(composition.len());
+    let len = composition.len();
+    debug_assert!(len <= MAX_COMPOSITION, "composition too long for stack canvas: {len}");
+    if len > MAX_COMPOSITION {
+        return;
+    }
+
+    let mut next_effect: [Option<usize>; MAX_COMPOSITION] = [None; MAX_COMPOSITION];
+    let mut head_effect: [Option<usize>; MAX_COMPOSITION] = [None; MAX_COMPOSITION];
+    let mut appending_idxs = [0usize; MAX_COMPOSITION];
+    let mut appending_len = 0usize;
 
     for (idx, trans) in composition.iter().enumerate() {
-        if (options.contains(OutputOptions::RAW)
-            || trans.rule.effect_type == EffectType::Appending)
+        if (options.contains(OutputOptions::RAW) || trans.rule.effect_type == EffectType::Appending)
             && trans.rule.key != '\0'
         {
-            appending_list.push((idx, *trans));
+            appending_idxs[appending_len] = idx;
+            appending_len += 1;
         } else if let Some(target) = trans.target
-            && target < head_effect.len()
+            && target < len
         {
             next_effect[idx] = head_effect[target];
             head_effect[target] = Some(idx);
         }
     }
 
-    for (abs_idx, appending_trans) in appending_list {
+    for &abs_idx in appending_idxs.iter().take(appending_len) {
+        let appending_trans = &composition[abs_idx];
+
         let mut chr: char;
         if options.contains(OutputOptions::RAW) {
             chr = appending_trans.rule.key;
         } else {
             chr = appending_trans.rule.effect_on;
-            // Iterate through effects targeting this character (in reverse order because of linked list)
-            let mut curr = head_effect[abs_idx];
-            let mut effects = [None; 8]; // Maximum 8 effects per character is plenty
-            let mut count = 0;
-            while let Some(idx) = curr {
-                if count < 8 {
-                    effects[count] = Some(idx);
-                    count += 1;
-                }
-                curr = next_effect[idx];
-            }
 
-            // Apply in original order (effects were added to linked list in original order,
-            // so head_effect points to the LAST effect). We iterate backwards.
-            for i in (0..count).rev() {
-                let t = composition[effects[i].unwrap()];
-                match t.rule.effect_type {
-                    EffectType::MarkTransformation => {
-                        if t.rule.effect == Mark::Raw as u8 {
-                            chr = appending_trans.rule.key;
-                        } else {
-                            chr = add_mark_to_char(chr, t.rule.effect);
-                        }
-                    }
-                    EffectType::ToneTransformation => {
-                        chr = add_tone_to_char(chr, t.rule.effect);
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        if options.contains(OutputOptions::TONE_LESS) {
-            chr = add_tone_to_char(chr, 0);
-        }
-        if options.contains(OutputOptions::MARK_LESS) {
-            chr = add_mark_to_char(chr, 0);
-        }
-        if options.contains(OutputOptions::LOWER_CASE) {
-            chr = lower(chr);
-        } else if appending_trans.is_upper_case {
-            chr = upper(chr);
-        }
-        out.push(chr);
-    }
-}
-
-fn write_canvas_slice(
-    composition: &[Transformation],
-    options: OutputOptions,
-    out: &mut String,
-) {
-    if composition.is_empty() {
-        return;
-    }
-
-    let mut next_effect = vec![None; composition.len()];
-    let mut head_effect = vec![None; composition.len()];
-    let mut appending_list = Vec::with_capacity(composition.len());
-
-    for (idx, trans) in composition.iter().enumerate() {
-        if (options.contains(OutputOptions::RAW)
-            || trans.rule.effect_type == EffectType::Appending)
-            && trans.rule.key != '\0'
-        {
-            appending_list.push((idx, trans));
-        } else if let Some(target) = trans.target
-            && target < head_effect.len()
-        {
-            next_effect[idx] = head_effect[target];
-            head_effect[target] = Some(idx);
-        }
-    }
-
-    for (abs_idx, appending_trans) in appending_list {
-        let mut chr: char;
-        if options.contains(OutputOptions::RAW) {
-            chr = appending_trans.rule.key;
-        } else {
-            chr = appending_trans.rule.effect_on;
             let mut curr = head_effect[abs_idx];
             let mut effects = [None; 8];
             let mut count = 0;
@@ -243,22 +120,19 @@ fn write_canvas_slice(
             chr = add_tone_to_char(chr, 0);
         }
         if options.contains(OutputOptions::MARK_LESS) {
-            chr = add_mark_to_char(chr, 0);
+            chr = crate::utils::add_mark_to_toneless_char(add_tone_to_char(chr, 0), 0);
         }
+
         if options.contains(OutputOptions::LOWER_CASE) {
-            chr = lower(chr);
+            out.push(lower(chr));
         } else if appending_trans.is_upper_case {
-            chr = upper(chr);
+            out.push(upper(chr));
+        } else {
+            out.push(chr);
         }
-        out.push(chr);
     }
 }
 
-#[allow(dead_code)]
-/// Finds the first character that would be visible in the output starting from a specific index in the composition.
-///
-/// This function resolves the character by applying all relevant transformations that target it
-/// within the suffix starting at `start`.
 pub(crate) fn first_canvas_char_in_suffix(
     composition: &[Transformation],
     start: usize,
@@ -274,9 +148,7 @@ pub(crate) fn first_canvas_char_in_suffix(
             first = Some((abs_idx, trans));
             break;
         }
-        if trans.rule.effect_type == EffectType::Appending
-            && trans.rule.key != '\0'
-        {
+        if trans.rule.effect_type == EffectType::Appending && trans.rule.key != '\0' {
             first = Some((abs_idx, trans));
             break;
         }
@@ -312,7 +184,7 @@ pub(crate) fn first_canvas_char_in_suffix(
         chr = add_tone_to_char(chr, 0);
     }
     if options.contains(OutputOptions::MARK_LESS) {
-        chr = add_mark_to_char(chr, 0);
+        chr = crate::utils::add_mark_to_toneless_char(add_tone_to_char(chr, 0), 0);
     }
     if options.contains(OutputOptions::LOWER_CASE) {
         chr = lower(chr);
@@ -337,7 +209,8 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'a',
                 result: 'a',
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             },
             target: None,
             is_upper_case: false,
@@ -349,7 +222,8 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: ' ',
                 result: ' ',
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             },
             target: None,
             is_upper_case: false,
@@ -361,20 +235,15 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'w',
                 result: 'w',
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             },
             target: None,
             is_upper_case: false,
         };
         let comp = vec![t1, t2, t3];
-        assert_eq!(
-            first_canvas_char_in_suffix(&comp, 1, OutputOptions::RAW),
-            Some(' ')
-        );
-        assert_eq!(
-            first_canvas_char_in_suffix(&comp, 2, OutputOptions::NONE),
-            Some('w')
-        );
+        assert_eq!(first_canvas_char_in_suffix(&comp, 1, OutputOptions::RAW), Some(' '));
+        assert_eq!(first_canvas_char_in_suffix(&comp, 2, OutputOptions::NONE), Some('w'));
     }
 
     #[test]
@@ -386,7 +255,8 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'x',
                 result: 'x',
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             },
             target: None,
             is_upper_case: false,
@@ -398,7 +268,8 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'o',
                 result: 'o',
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             },
             target: None,
             is_upper_case: false,
@@ -410,16 +281,14 @@ mod tests {
                 effect_type: EffectType::MarkTransformation,
                 effect_on: 'o',
                 result: 'ô',
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             },
             target: Some(1),
             is_upper_case: false,
         };
         let comp = vec![x, o, mark_hat];
-        assert_eq!(
-            first_canvas_char_in_suffix(&comp, 1, OutputOptions::NONE),
-            Some('ô')
-        );
+        assert_eq!(first_canvas_char_in_suffix(&comp, 1, OutputOptions::NONE), Some('ô'));
     }
 
     #[test]
@@ -431,7 +300,8 @@ mod tests {
                 effect_type: EffectType::Appending,
                 effect_on: 'o',
                 result: 'o',
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             },
             target: None,
             is_upper_case: false,
@@ -443,7 +313,8 @@ mod tests {
                 effect_type: EffectType::MarkTransformation,
                 effect_on: 'o',
                 result: 'ô',
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             },
             target: Some(0),
             is_upper_case: false,
@@ -455,7 +326,8 @@ mod tests {
                 effect_type: EffectType::ToneTransformation,
                 effect_on: '\0',
                 result: '\0',
-                appended_rules: Box::default(),
+                appended: ['\0'; 2],
+                appended_len: 0,
             },
             target: Some(0),
             is_upper_case: false,

@@ -187,8 +187,7 @@ pub fn get_input_method(name: &str) -> Option<&'static InputMethodDef> {
 }
 
 /// Returns all available input method definitions.
-pub fn get_input_method_definitions()
--> &'static Map<&'static str, &'static InputMethodDef> {
+pub fn get_input_method_definitions() -> &'static Map<&'static str, &'static InputMethodDef> {
     &INPUT_METHOD_DEFS
 }
 

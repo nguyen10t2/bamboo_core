@@ -98,11 +98,7 @@ pub mod advanced {
     pub use crate::input_method::{EffectType, Mark, Rule, Tone};
     pub use crate::mode::OutputOptions;
 
-    pub use crate::charset_def::{
-        get_charset_definition, get_charset_definitions,
-    };
-    pub use crate::encoder::{encode, get_charset_names};
-    pub use crate::input_method_def::{
-        get_input_method, get_input_method_definitions,
-    };
+    pub use crate::charset_def::{get_charset_definition, get_charset_definitions};
+    pub use crate::encoder::{encode, get_charset_name, get_charset_names};
+    pub use crate::input_method_def::{get_input_method, get_input_method_definitions};
 }

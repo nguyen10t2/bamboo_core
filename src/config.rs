@@ -15,11 +15,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            free_tone_marking: true,
-            std_tone_style: true,
-            auto_correct: true,
-        }
+        Self { free_tone_marking: true, std_tone_style: true, auto_correct: true }
     }
 }
 

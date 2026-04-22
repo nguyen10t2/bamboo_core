@@ -1,27 +1,19 @@
 //! Utility functions for Vietnamese character manipulation.
 //!
 //! This module provides low-level tools for identifying vowels, adding tones,
-//! and managing diacritic marks.
+//! and managing diacritic marks using optimized lookup tables.
 
-use phf::{Map, Set, phf_map, phf_set};
+use phf::{Map, phf_map};
 
 /// A list of all Vietnamese vowels with their various tone marks.
 pub const VOWELS: &[char] = &[
-    'a', 'à', 'á', 'ả', 'ã', 'ạ', 'ă', 'ằ', 'ắ', 'ẳ', 'ẵ', 'ặ', 'â', 'ầ', 'ấ',
-    'ẩ', 'ẫ', 'ậ', 'e', 'è', 'é', 'ẻ', 'ẽ', 'ẹ', 'ê', 'ề', 'ế', 'ể', 'ễ', 'ệ',
-    'i', 'ì', 'í', 'ỉ', 'ĩ', 'ị', 'o', 'ò', 'ó', 'ỏ', 'õ', 'ọ', 'ô', 'ồ', 'ố',
-    'ổ', 'ỗ', 'ộ', 'ơ', 'ờ', 'ớ', 'ở', 'ỡ', 'ợ', 'u', 'ù', 'ú', 'ủ', 'ũ', 'ụ',
-    'ư', 'ừ', 'ứ', 'ử', 'ữ', 'ự', 'y', 'ỳ', 'ý', 'ỷ', 'ỹ', 'ỵ',
+    'a', 'à', 'á', 'ả', 'ã', 'ạ', 'ă', 'ằ', 'ắ', 'ẳ', 'ẵ', 'ặ', 'â', 'ầ', 'ấ', 'ẩ', 'ẫ', 'ậ', 'e',
+    'è', 'é', 'ẻ', 'ẽ', 'ẹ', 'ê', 'ề', 'ế', 'ể', 'ễ', 'ệ', 'i', 'ì', 'í', 'ỉ', 'ĩ', 'ị', 'o', 'ò',
+    'ó', 'ỏ', 'õ', 'ọ', 'ô', 'ồ', 'ố', 'ổ', 'ỗ', 'ộ', 'ơ', 'ờ', 'ớ', 'ở', 'ỡ', 'ợ', 'u', 'ù', 'ú',
+    'ủ', 'ũ', 'ụ', 'ư', 'ừ', 'ứ', 'ử', 'ữ', 'ự', 'y', 'ỳ', 'ý', 'ỷ', 'ỹ', 'ỵ',
 ];
 
-static VOWELS_SET: Set<char> = phf_set! {
-    'a', 'à', 'á', 'ả', 'ã', 'ạ', 'ă', 'ằ', 'ắ', 'ẳ', 'ẵ', 'ặ', 'â', 'ầ', 'ấ',
-    'ẩ', 'ẫ', 'ậ', 'e', 'è', 'é', 'ẻ', 'ẽ', 'ẹ', 'ê', 'ề', 'ế', 'ể', 'ễ', 'ệ',
-    'i', 'ì', 'í', 'ỉ', 'ĩ', 'ị', 'o', 'ò', 'ó', 'ỏ', 'õ', 'ọ', 'ô', 'ồ', 'ố',
-    'ổ', 'ỗ', 'ộ', 'ơ', 'ờ', 'ớ', 'ở', 'ỡ', 'ợ', 'u', 'ù', 'ú', 'ủ', 'ũ', 'ụ',
-    'ư', 'ừ', 'ứ', 'ử', 'ữ', 'ự', 'y', 'ỳ', 'ý', 'ỷ', 'ỹ', 'ỵ',
-};
-
+/// Mapping from a Vietnamese vowel to its index in the [`VOWELS`] array.
 static VOWEL_INDEX: Map<char, usize> = phf_map! {
     'a'=>0,'à'=>1,'á'=>2,'ả'=>3,'ã'=>4,'ạ'=>5,
     'ă'=>6,'ằ'=>7,'ắ'=>8,'ẳ'=>9,'ẵ'=>10,'ặ'=>11,
@@ -37,13 +29,7 @@ static VOWEL_INDEX: Map<char, usize> = phf_map! {
     'y'=>66,'ỳ'=>67,'ý'=>68,'ỷ'=>69,'ỹ'=>70,'ỵ'=>71,
 };
 
-static PUNCTUATION: Set<char> = phf_set! {
-    ',', ';', ':', '.', '"', '\'', '!', '?', ' ',
-    '<', '>', '=', '+', '-', '*', '/', '\\',
-    '_', '~', '`', '@', '#', '$', '%', '^', '&', '(', ')', '{', '}', '[', ']',
-    '|',
-};
-
+/// Maps a toneless vowel to its versions with different diacritics.
 static MARKS_MAPS: Map<char, [char; 5]> = phf_map! {
     'a' => ['a','â','ă','_','_'],
     'â' => ['a','â','ă','_','_'],
@@ -63,6 +49,49 @@ static MARKS_MAPS: Map<char, [char; 5]> = phf_map! {
     'đ' => ['d','_','_','_','đ'],
 };
 
+// Flags for ASCII properties
+const F_VOWEL: u8 = 1 << 0;
+const F_ALPHA: u8 = 1 << 1;
+const F_PUNCT: u8 = 1 << 2;
+
+/// A pre-computed lookup table for ASCII characters (0-127).
+static ASCII_PROPS: [u8; 128] = {
+    let mut props = [0u8; 128];
+    let mut i = 0;
+    while i < 128 {
+        let c = i as u8 as char;
+        let is_alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        if is_alpha {
+            props[i] |= F_ALPHA;
+        }
+        let is_vowel = c == 'a'
+            || c == 'e'
+            || c == 'i'
+            || c == 'o'
+            || c == 'u'
+            || c == 'y'
+            || c == 'A'
+            || c == 'E'
+            || c == 'I'
+            || c == 'O'
+            || c == 'U'
+            || c == 'Y';
+        if is_vowel {
+            props[i] |= F_VOWEL;
+        }
+        let is_punct = (c >= '!' && c <= '/')
+            || (c >= ':' && c <= '@')
+            || (c >= '[' && c <= '`')
+            || (c >= '{' && c <= '~')
+            || c == ' ';
+        if is_punct {
+            props[i] |= F_PUNCT;
+        }
+        i += 1;
+    }
+    props
+};
+
 /// Returns true if the character is a space.
 #[inline]
 pub fn is_space(c: char) -> bool {
@@ -72,7 +101,10 @@ pub fn is_space(c: char) -> bool {
 /// Returns true if the character is a common punctuation mark.
 #[inline]
 pub fn is_punctuation(c: char) -> bool {
-    PUNCTUATION.contains(&c)
+    if c.is_ascii() {
+        return (ASCII_PROPS[c as usize] & F_PUNCT) != 0;
+    }
+    c.is_ascii_punctuation() // Best approximation
 }
 
 /// Returns true if the character should trigger a word break.
@@ -81,16 +113,22 @@ pub fn is_word_break_symbol(c: char) -> bool {
     is_punctuation(c) || c.is_ascii_digit()
 }
 
-/// Returns true if the character is a Vietnamese vowel.
+/// Returns true if the character is a Vietnamese vowel (with or without tone/diacritic).
 #[inline]
 pub fn is_vowel(c: char) -> bool {
-    VOWELS_SET.contains(&c)
+    if c.is_ascii() {
+        return (ASCII_PROPS[c as usize] & F_VOWEL) != 0;
+    }
+    VOWEL_INDEX.contains_key(&c)
 }
 
-/// Returns true if the character is an ASCII alphabetic character.
+/// Returns true if the character is a basic ASCII alphabetic character.
 #[inline]
 pub fn is_alpha(c: char) -> bool {
-    c.is_ascii_alphabetic()
+    if c.is_ascii() {
+        return (ASCII_PROPS[c as usize] & F_ALPHA) != 0;
+    }
+    false
 }
 
 #[inline]
@@ -104,6 +142,8 @@ fn find_tone_from_char(c: char) -> u8 {
 }
 
 /// Adds or changes the tone mark of a Vietnamese vowel.
+///
+/// `tone` should be a value from 0 to 5.
 #[inline]
 pub fn add_tone_to_char(c: char, tone: u8) -> char {
     find_vowel_position(c)
@@ -125,7 +165,7 @@ pub fn add_mark_to_toneless_char(c: char, mark: u8) -> char {
         .unwrap_or(c)
 }
 
-/// Adds a diacritic mark to a character while preserving its current tone.
+/// Adds a diacritic mark to a character while preserving its current tone mark.
 #[inline]
 pub fn add_mark_to_char(c: char, mark: u8) -> char {
     let tone = find_tone_from_char(c);

@@ -2187,14 +2187,11 @@ static CHARSET_DEFINITIONS: Map<&'static str, &'static CharsetDefinition> = phf_
 /// Retrieves a character set definition by its name.
 ///
 /// Returns `None` if the charset name is not recognized.
-pub fn get_charset_definition(
-    name: &str,
-) -> Option<&'static CharsetDefinition> {
+pub fn get_charset_definition(name: &str) -> Option<&'static CharsetDefinition> {
     CHARSET_DEFINITIONS.get(name).copied()
 }
 
 /// Returns a map of all available character set definitions.
-pub fn get_charset_definitions()
--> &'static Map<&'static str, &'static CharsetDefinition> {
+pub fn get_charset_definitions() -> &'static Map<&'static str, &'static CharsetDefinition> {
     &CHARSET_DEFINITIONS
 }

@@ -80,19 +80,79 @@ pub extern "C" fn bamboo_set_input_method(method: i32) {
 /// A pointer to a null-terminated UTF-8 string.
 /// **Note:** The caller is responsible for freeing the returned string using [`bamboo_free_string`].
 #[unsafe(no_mangle)]
-pub extern "C" fn bamboo_process_key(
-    key: u32,
-    is_vietnamese: i32,
-) -> *mut c_char {
+pub extern "C" fn bamboo_process_key(key: u32, is_vietnamese: i32) -> *mut c_char {
     with_engine(|e| {
-        let mode =
-            if is_vietnamese != 0 { Mode::Vietnamese } else { Mode::English };
+        let mode = if is_vietnamese != 0 { Mode::Vietnamese } else { Mode::English };
         if let Some(c) = std::char::from_u32(key) {
             e.process_key(c, mode);
         }
         let out = e.output();
         CString::new(out).unwrap().into_raw()
     })
+}
+
+/// Processes a key and writes the delta output (inserted UTF-8 bytes) into a caller-provided buffer.
+///
+/// # Safety
+/// - `out_buf` must be a valid pointer to a buffer of at least `out_cap` bytes if `out_cap > 0`.
+/// - `out_len`, `backspaces_chars`, and `backspaces_bytes` must be valid, non-null pointers to `usize`.
+/// - The caller must ensure that no other thread is accessing the global engine simultaneously (this function uses a Mutex internally for safety, but pointer validity is the caller's responsibility).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_process_key_buf(
+    key: u32,
+    is_vietnamese: i32,
+    out_buf: *mut u8,
+    out_cap: usize,
+    out_len: *mut usize,
+    backspaces_chars: *mut usize,
+    backspaces_bytes: *mut usize,
+) -> i32 {
+    if out_len.is_null() || backspaces_chars.is_null() || backspaces_bytes.is_null() {
+        return -1;
+    }
+
+    let out_len = unsafe { &mut *out_len };
+    let backspaces_chars = unsafe { &mut *backspaces_chars };
+    let backspaces_bytes = unsafe { &mut *backspaces_bytes };
+
+    let mode = if is_vietnamese != 0 { Mode::Vietnamese } else { Mode::English };
+
+    let mut guard = match GLOBAL_ENGINE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if guard.is_none() {
+        *guard = Some(Engine::new(InputMethod::telex()));
+    }
+    let e = guard.as_mut().unwrap();
+
+    let Some(c) = std::char::from_u32(key) else {
+        *out_len = 0;
+        *backspaces_chars = 0;
+        *backspaces_bytes = 0;
+        return 0;
+    };
+
+    let (bs_chars, bs_bytes, inserted) = e.process_key_delta(c, mode);
+    let bytes = inserted.as_bytes();
+
+    *out_len = bytes.len();
+    *backspaces_chars = bs_chars;
+    *backspaces_bytes = bs_bytes;
+
+    if bytes.len() > out_cap {
+        return 1;
+    }
+    if !bytes.is_empty() {
+        if out_buf.is_null() {
+            return -1;
+        }
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
+        }
+    }
+
+    0
 }
 
 /// Returns the current word output as a C-compatible string.
@@ -170,20 +230,11 @@ pub unsafe extern "C" fn bamboo_engine_free(engine: *mut BambooEngine) {
 
 /// Processes a key using a specific engine instance.
 ///
-/// # Arguments
-///
-/// * `engine` - A pointer to a [`BambooEngine`] instance.
-/// * `key` - The Unicode code point of the key to process.
-///
-/// # Returns
-///
-/// A pointer to a null-terminated UTF-8 string representing the current word.
-/// **Note:** The caller is responsible for freeing the returned string using [`bamboo_free_string`].
+/// # Safety
+/// - `engine` must be a valid, non-null pointer to a `BambooEngine` instance.
+/// - The caller is responsible for freeing the returned string using `bamboo_free_string`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn bamboo_engine_process(
-    engine: *mut BambooEngine,
-    key: u32,
-) -> *mut c_char {
+pub unsafe extern "C" fn bamboo_engine_process(engine: *mut BambooEngine, key: u32) -> *mut c_char {
     if engine.is_null() {
         return ptr::null_mut();
     }
@@ -193,4 +244,64 @@ pub unsafe extern "C" fn bamboo_engine_process(
     }
     let out = e.output();
     CString::new(out).unwrap().into_raw()
+}
+
+/// Instance-based variant of [`bamboo_process_key_buf`].
+///
+/// # Safety
+/// - `engine` must be a valid, non-null pointer to a `BambooEngine` instance.
+/// - `out_buf` must be a valid pointer to a buffer of at least `out_cap` bytes if `out_cap > 0`.
+/// - `out_len`, `backspaces_chars`, and `backspaces_bytes` must be valid, non-null pointers to `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bamboo_engine_process_key_buf(
+    engine: *mut BambooEngine,
+    key: u32,
+    is_vietnamese: i32,
+    out_buf: *mut u8,
+    out_cap: usize,
+    out_len: *mut usize,
+    backspaces_chars: *mut usize,
+    backspaces_bytes: *mut usize,
+) -> i32 {
+    if engine.is_null() {
+        return -2;
+    }
+    if out_len.is_null() || backspaces_chars.is_null() || backspaces_bytes.is_null() {
+        return -1;
+    }
+
+    let out_len = unsafe { &mut *out_len };
+    let backspaces_chars = unsafe { &mut *backspaces_chars };
+    let backspaces_bytes = unsafe { &mut *backspaces_bytes };
+
+    let mode = if is_vietnamese != 0 { Mode::Vietnamese } else { Mode::English };
+
+    let e = unsafe { &mut *engine };
+    let Some(c) = std::char::from_u32(key) else {
+        *out_len = 0;
+        *backspaces_chars = 0;
+        *backspaces_bytes = 0;
+        return 0;
+    };
+
+    let (bs_chars, bs_bytes, inserted) = e.process_key_delta(c, mode);
+    let bytes = inserted.as_bytes();
+
+    *out_len = bytes.len();
+    *backspaces_chars = bs_chars;
+    *backspaces_bytes = bs_bytes;
+
+    if bytes.len() > out_cap {
+        return 1;
+    }
+    if !bytes.is_empty() {
+        if out_buf.is_null() {
+            return -1;
+        }
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
+        }
+    }
+
+    0
 }

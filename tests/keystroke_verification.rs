@@ -4,11 +4,7 @@ fn verify_keystrokes(im: InputMethod, sequence: &str, expected_steps: &[&str]) {
     let mut engine = Engine::new(im);
     let steps: Vec<char> = sequence.chars().collect();
 
-    assert_eq!(
-        steps.len(),
-        expected_steps.len(),
-        "Sequence and expected steps length mismatch"
-    );
+    assert_eq!(steps.len(), expected_steps.len(), "Sequence and expected steps length mismatch");
 
     for (i, &ch) in steps.iter().enumerate() {
         engine.process_key(ch, Mode::Vietnamese);

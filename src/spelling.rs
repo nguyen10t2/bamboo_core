@@ -1,25 +1,131 @@
+//! Vietnamese spelling validation logic based on CVC (Consonant-Vowel-Consonant) structure.
+
 use crate::utils::add_mark_to_toneless_char;
 
-static FIRST_CONSONANT_SEQS: &[&str] = &[
-    "b d đ g gh m n nh p ph r s t tr v z",
-    "c h k kh qu th",
-    "ch gi l ng ngh x",
-    "đ l",
-    "h",
-];
+// Static token representation: (chars, length)
+type Token = ([char; 4], u8);
 
-static VOWEL_SEQS: &[&str] = &[
-    "ê i ua uê uy y",
-    "a iê oa uyê yê",
-    "â ă e o oo ô ơ oe u ư uâ uô ươ",
-    "oă",
-    "uơ",
-    "ai ao au âu ay ây eo êu ia iêu iu oai oao oay oeo oi ôi ơi ưa uây ui ưi uôi ươi ươu ưu uya uyu yêu",
-    "ă",
-    "i",
+// Manual definition for now to ensure it compiles and is fast.
+// In a real scenario, we might use a build script or a more sophisticated const-fn.
+static FC_0: &[Token] = &[
+    (['b', '\0', '\0', '\0'], 1),
+    (['d', '\0', '\0', '\0'], 1),
+    (['đ', '\0', '\0', '\0'], 1),
+    (['g', '\0', '\0', '\0'], 1),
+    (['g', 'h', '\0', '\0'], 2),
+    (['m', '\0', '\0', '\0'], 1),
+    (['n', '\0', '\0', '\0'], 1),
+    (['n', 'h', '\0', '\0'], 2),
+    (['p', '\0', '\0', '\0'], 1),
+    (['p', 'h', '\0', '\0'], 2),
+    (['r', '\0', '\0', '\0'], 1),
+    (['s', '\0', '\0', '\0'], 1),
+    (['t', '\0', '\0', '\0'], 1),
+    (['t', 'r', '\0', '\0'], 2),
+    (['v', '\0', '\0', '\0'], 1),
+    (['z', '\0', '\0', '\0'], 1),
 ];
+static FC_1: &[Token] = &[
+    (['c', '\0', '\0', '\0'], 1),
+    (['h', '\0', '\0', '\0'], 1),
+    (['k', '\0', '\0', '\0'], 1),
+    (['k', 'h', '\0', '\0'], 2),
+    (['q', 'u', '\0', '\0'], 2),
+    (['t', 'h', '\0', '\0'], 2),
+];
+static FC_2: &[Token] = &[
+    (['c', 'h', '\0', '\0'], 2),
+    (['g', 'i', '\0', '\0'], 2),
+    (['l', '\0', '\0', '\0'], 1),
+    (['n', 'g', '\0', '\0'], 2),
+    (['n', 'g', 'h', '\0'], 3),
+    (['x', '\0', '\0', '\0'], 1),
+];
+static FC_3: &[Token] = &[(['đ', '\0', '\0', '\0'], 1), (['l', '\0', '\0', '\0'], 1)];
+static FC_4: &[Token] = &[(['h', '\0', '\0', '\0'], 1)];
 
-static LAST_CONSONANT_SEQS: &[&str] = &["ch nh", "c ng", "m n p t", "k", "c"];
+static FC_ROWS: &[&[Token]] = &[FC_0, FC_1, FC_2, FC_3, FC_4];
+
+static VO_0: &[Token] = &[
+    (['ê', '\0', '\0', '\0'], 1),
+    (['i', '\0', '\0', '\0'], 1),
+    (['u', 'a', '\0', '\0'], 2),
+    (['u', 'ê', '\0', '\0'], 2),
+    (['u', 'y', '\0', '\0'], 2),
+    (['y', '\0', '\0', '\0'], 1),
+];
+static VO_1: &[Token] = &[
+    (['a', '\0', '\0', '\0'], 1),
+    (['i', 'ê', '\0', '\0'], 2),
+    (['o', 'a', '\0', '\0'], 2),
+    (['u', 'y', 'ê', '\0'], 3),
+    (['y', 'ê', '\0', '\0'], 2),
+];
+static VO_2: &[Token] = &[
+    (['â', '\0', '\0', '\0'], 1),
+    (['ă', '\0', '\0', '\0'], 1),
+    (['e', '\0', '\0', '\0'], 1),
+    (['o', '\0', '\0', '\0'], 1),
+    (['o', 'o', '\0', '\0'], 2),
+    (['ô', '\0', '\0', '\0'], 1),
+    (['ơ', '\0', '\0', '\0'], 1),
+    (['o', 'e', '\0', '\0'], 2),
+    (['u', '\0', '\0', '\0'], 1),
+    (['ư', '\0', '\0', '\0'], 1),
+    (['u', 'â', '\0', '\0'], 2),
+    (['u', 'ô', '\0', '\0'], 2),
+    (['ư', 'ơ', '\0', '\0'], 2),
+];
+static VO_3: &[Token] = &[(['o', 'ă', '\0', '\0'], 2)];
+static VO_4: &[Token] = &[(['u', 'ơ', '\0', '\0'], 2)];
+static VO_5: &[Token] = &[
+    (['a', 'i', '\0', '\0'], 2),
+    (['a', 'o', '\0', '\0'], 2),
+    (['a', 'u', '\0', '\0'], 2),
+    (['â', 'u', '\0', '\0'], 2),
+    (['a', 'y', '\0', '\0'], 2),
+    (['â', 'y', '\0', '\0'], 2),
+    (['e', 'o', '\0', '\0'], 2),
+    (['ê', 'u', '\0', '\0'], 2),
+    (['i', 'a', '\0', '\0'], 2),
+    (['i', 'ê', 'u', '\0'], 3),
+    (['i', 'u', '\0', '\0'], 2),
+    (['o', 'a', 'i', '\0'], 3),
+    (['o', 'a', 'o', '\0'], 3),
+    (['o', 'a', 'y', '\0'], 3),
+    (['o', 'e', 'o', '\0'], 3),
+    (['o', 'i', '\0', '\0'], 2),
+    (['ô', 'i', '\0', '\0'], 2),
+    (['ơ', 'i', '\0', '\0'], 2),
+    (['ư', 'a', '\0', '\0'], 2),
+    (['u', 'â', 'y', '\0'], 3),
+    (['u', 'i', '\0', '\0'], 2),
+    (['ư', 'i', '\0', '\0'], 2),
+    (['u', 'ô', 'i', '\0'], 3),
+    (['ư', 'ơ', 'i', '\0'], 3),
+    (['ư', 'ơ', 'u', '\0'], 3),
+    (['ư', 'u', '\0', '\0'], 2),
+    (['u', 'y', 'a', '\0'], 3),
+    (['u', 'y', 'u', '\0'], 3),
+    (['y', 'ê', 'u', '\0'], 3),
+];
+static VO_6: &[Token] = &[(['ă', '\0', '\0', '\0'], 1)];
+static VO_7: &[Token] = &[(['i', '\0', '\0', '\0'], 1)];
+
+static VO_ROWS: &[&[Token]] = &[VO_0, VO_1, VO_2, VO_3, VO_4, VO_5, VO_6, VO_7];
+
+static LC_0: &[Token] = &[(['c', 'h', '\0', '\0'], 2), (['n', 'h', '\0', '\0'], 2)];
+static LC_1: &[Token] = &[(['c', '\0', '\0', '\0'], 1), (['n', 'g', '\0', '\0'], 2)];
+static LC_2: &[Token] = &[
+    (['m', '\0', '\0', '\0'], 1),
+    (['n', '\0', '\0', '\0'], 1),
+    (['p', '\0', '\0', '\0'], 1),
+    (['t', '\0', '\0', '\0'], 1),
+];
+static LC_3: &[Token] = &[(['k', '\0', '\0', '\0'], 1)];
+static LC_4: &[Token] = &[(['c', '\0', '\0', '\0'], 1)];
+
+static LC_ROWS: &[&[Token]] = &[LC_0, LC_1, LC_2, LC_3, LC_4];
 
 const CV_ALLOWED_MASKS: [u16; 5] = [
     (1 << 0) | (1 << 1) | (1 << 2) | (1 << 5),
@@ -40,33 +146,29 @@ const VC_ALLOWED_MASKS: [u16; 8] = [
     1 << 4,
 ];
 
-// ================= LOOKUP (LOW-ALLOC MASK) =================
-
-fn lookup_mask(
-    seq: &[&str],
-    input: &str,
+fn lookup_mask_optimized(
+    rows: &[&[Token]],
+    input: &[char],
     input_is_full: bool,
     input_is_complete: bool,
 ) -> u16 {
-    let input_len = input.chars().count();
+    let input_len = input.len() as u8;
     let mut ret = 0u16;
 
-    for (index, row) in seq.iter().enumerate() {
-        for token in row.split_whitespace() {
-            let token_len = token.chars().count();
-            if token_len < input_len {
+    for (index, tokens) in rows.iter().enumerate() {
+        for (t_chars, t_len) in *tokens {
+            if *t_len < input_len {
                 continue;
             }
-            if input_is_full && token_len > input_len {
+            if input_is_full && *t_len > input_len {
                 continue;
             }
 
             let mut is_match = true;
-            for (ic, tc) in input.chars().zip(token.chars()) {
-                if ic != tc
-                    && (input_is_complete
-                        || add_mark_to_toneless_char(tc, 0) != ic)
-                {
+            for i in 0..input.len() {
+                let ic = input[i];
+                let tc = t_chars[i];
+                if ic != tc && (input_is_complete || add_mark_to_toneless_char(tc, 0) != ic) {
                     is_match = false;
                     break;
                 }
@@ -86,9 +188,7 @@ fn is_valid_cv(fc_mask: u16, vo_mask: u16) -> bool {
     let mut mask = fc_mask;
     while mask != 0 {
         let idx = mask.trailing_zeros() as usize;
-        if idx < CV_ALLOWED_MASKS.len()
-            && (CV_ALLOWED_MASKS[idx] & vo_mask) != 0
-        {
+        if idx < CV_ALLOWED_MASKS.len() && (CV_ALLOWED_MASKS[idx] & vo_mask) != 0 {
             return true;
         }
         mask &= mask - 1;
@@ -100,9 +200,7 @@ fn is_valid_vc(vo_mask: u16, lc_mask: u16) -> bool {
     let mut mask = vo_mask;
     while mask != 0 {
         let idx = mask.trailing_zeros() as usize;
-        if idx < VC_ALLOWED_MASKS.len()
-            && (VC_ALLOWED_MASKS[idx] & lc_mask) != 0
-        {
+        if idx < VC_ALLOWED_MASKS.len() && (VC_ALLOWED_MASKS[idx] & lc_mask) != 0 {
             return true;
         }
         mask &= mask - 1;
@@ -118,14 +216,34 @@ fn is_valid_vc(vo_mask: u16, lc_mask: u16) -> bool {
 /// * `vo` - Vowel(s).
 /// * `lc` - Last consonant(s).
 /// * `full` - Whether the input is considered complete (affects strictness of matching).
-///
-/// # Returns
-///
-/// `true` if the combination forms a valid (or potentially valid) Vietnamese syllable.
 pub fn is_valid_cvc(fc: &str, vo: &str, lc: &str, full: bool) -> bool {
+    let mut fc_chars = ['\0'; 8];
+    let mut vo_chars = ['\0'; 8];
+    let mut lc_chars = ['\0'; 8];
+
+    let mut fc_len = 0;
+    for c in fc.chars().take(8) {
+        fc_chars[fc_len] = c;
+        fc_len += 1;
+    }
+    let mut vo_len = 0;
+    for c in vo.chars().take(8) {
+        vo_chars[vo_len] = c;
+        vo_len += 1;
+    }
+    let mut lc_len = 0;
+    for c in lc.chars().take(8) {
+        lc_chars[lc_len] = c;
+        lc_len += 1;
+    }
+
+    is_valid_cvc_chars(&fc_chars[..fc_len], &vo_chars[..vo_len], &lc_chars[..lc_len], full)
+}
+
+/// Low-level variant of [`is_valid_cvc`] that works directly with character slices.
+pub fn is_valid_cvc_chars(fc: &[char], vo: &[char], lc: &[char], full: bool) -> bool {
     let fc_mask = if !fc.is_empty() {
-        let m =
-            lookup_mask(FIRST_CONSONANT_SEQS, fc, full || !vo.is_empty(), true);
+        let m = lookup_mask_optimized(FC_ROWS, fc, full || !vo.is_empty(), true);
         if m == 0 {
             return false;
         }
@@ -135,7 +253,7 @@ pub fn is_valid_cvc(fc: &str, vo: &str, lc: &str, full: bool) -> bool {
     };
 
     let vo_mask = if !vo.is_empty() {
-        let m = lookup_mask(VOWEL_SEQS, vo, full || !lc.is_empty(), full);
+        let m = lookup_mask_optimized(VO_ROWS, vo, full || !lc.is_empty(), full);
         if m == 0 {
             return false;
         }
@@ -145,7 +263,7 @@ pub fn is_valid_cvc(fc: &str, vo: &str, lc: &str, full: bool) -> bool {
     };
 
     let lc_mask = if !lc.is_empty() {
-        let m = lookup_mask(LAST_CONSONANT_SEQS, lc, full, true);
+        let m = lookup_mask_optimized(LC_ROWS, lc, full, true);
         if m == 0 {
             return false;
         }

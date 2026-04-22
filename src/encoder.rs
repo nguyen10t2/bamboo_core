@@ -31,8 +31,7 @@ pub fn encode(charset_name: &str, input: &str) -> String {
 
 /// Returns a list of all supported character set names.
 pub fn get_charset_name() -> Vec<String> {
-    let mut charset_names =
-        Vec::with_capacity(get_charset_definitions().len() + 1);
+    let mut charset_names = Vec::with_capacity(get_charset_definitions().len() + 1);
 
     charset_names.push(UNICODE.to_string());
     for (k, _) in get_charset_definitions() {
