@@ -1,14 +1,20 @@
+//! The core engine that processes keypresses and maintains the IME state.
+
 use crate::config::Config;
 use crate::input_method::{InputMethod, Rule};
 use crate::mode::{Mode, OutputOptions};
 
 const MAX_ACTIVE_TRANS: usize = 32;
 
-/// Represents a single keypress or a transformation derived from it.
+/// Represents a single keypress or a transformation derived from it (e.g., adding a mark or tone).
 #[derive(Clone, Debug)]
 pub struct Transformation {
+    /// The rule that was applied.
     pub rule: Rule,
+    /// The index of the transformation in the composition that this transformation targets (if any).
+    /// For example, a tone mark transformation targets an earlier vowel.
     pub target: Option<usize>,
+    /// Whether the resulting character should be uppercase.
     pub is_upper_case: bool,
 }
 
@@ -38,7 +44,9 @@ fn uoh_tail_match(s: &str) -> bool {
     false
 }
 
-/// The main entry point for the Vietnamese Input Method Engine.
+/// The main stateful processor of the Vietnamese Input Method Engine.
+///
+/// It maintains an internal buffer of transformations and produces the correctly marked Vietnamese text.
 pub struct Engine {
     committed_text: String,
     /// Stack-allocated buffer for the current syllable to avoid heap allocations.
@@ -55,10 +63,12 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Creates a new engine with the specified input method and default configuration.
     pub fn new(input_method: InputMethod) -> Self {
         Self::with_config(input_method, Config::default())
     }
 
+    /// Creates a new engine with a specific input method and configuration.
     pub fn with_config(input_method: InputMethod, config: Config) -> Self {
         let mut rules_by_key: std::collections::BTreeMap<char, Vec<Rule>> =
             std::collections::BTreeMap::new();
@@ -135,9 +145,13 @@ impl Engine {
     pub fn config(&self) -> Config {
         self.config
     }
+
+    /// Updates the engine configuration.
     pub fn set_config(&mut self, config: Config) {
         self.config = config;
     }
+
+    /// Returns a copy of the current input method.
     pub fn input_method(&self) -> InputMethod {
         self.input_method.clone()
     }
@@ -270,9 +284,12 @@ impl Engine {
         previous
     }
 
+    /// Processes a string of characters and returns the current active word.
     pub fn process(&mut self, s: &str, mode: Mode) -> String {
         self.process_str(s, mode).output()
     }
+
+    /// Processes a string of characters and returns a reference to the engine.
     pub fn process_str(&mut self, s: &str, mode: Mode) -> &Self {
         for key in s.chars() {
             self.process_key(key, mode);
@@ -280,6 +297,9 @@ impl Engine {
         self
     }
 
+    /// Processes a single character.
+    ///
+    /// The `mode` determines whether to apply Vietnamese transformation rules.
     pub fn process_key(&mut self, key: char, mode: Mode) {
         let lower_key = lower(key);
         let is_upper_case = is_upper(key);
@@ -311,6 +331,7 @@ impl Engine {
         }
     }
 
+    /// Clears the active syllable buffer.
     pub fn commit(&mut self) {
         if self.active_len == 0 {
             return;
@@ -320,11 +341,15 @@ impl Engine {
         self.active_len = 0;
     }
 
+    /// Returns the currently active syllable as a string.
     pub fn output(&self) -> String {
         let comp = self.active_composition_owned();
         crate::flattener::flatten_slice(&comp, OutputOptions::NONE)
     }
 
+    /// Returns the processed string according to the specified options.
+    ///
+    /// This can be used to get the full text (committed + active) or variations like toneless text.
     pub fn get_processed_str(&self, options: OutputOptions) -> String {
         let active_comp = self.active_composition_owned();
         if options.contains(OutputOptions::FULL_TEXT) {
@@ -343,6 +368,7 @@ impl Engine {
         crate::flattener::flatten_slice(&active_comp, options)
     }
 
+    /// Checks if the current composition forms a valid Vietnamese syllable.
     pub fn is_valid(&self, input_is_full_complete: bool) -> bool {
         let comp = self.active_composition_owned();
         self.is_valid_internal(&comp, input_is_full_complete)
@@ -357,6 +383,9 @@ impl Engine {
         crate::bamboo_util::is_valid(&refs, input_is_full_complete)
     }
 
+    /// Restores the last word in the composition.
+    ///
+    /// If `to_vietnamese` is true, it attempts to re-apply Vietnamese transformations.
     pub fn restore_last_word(&mut self, to_vietnamese: bool) {
         let comp = self.active_composition_owned();
         let refs: Vec<&Transformation> = comp.iter().collect();

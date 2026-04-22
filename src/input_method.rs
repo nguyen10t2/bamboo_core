@@ -7,11 +7,17 @@ use crate::utils::{add_mark_to_toneless_char, add_tone_to_char, is_vowel};
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
+    /// No tone (Ngang).
     None = 0,
+    /// Grave accent (Huyền).
     Grave = 1,
+    /// Acute accent (Sắc).
     Acute = 2,
+    /// Hook above (Hỏi).
     Hook = 3,
+    /// Tilde (Ngã).
     Tilde = 4,
+    /// Dot below (Nặng).
     Dot = 5,
 }
 
@@ -19,12 +25,17 @@ pub enum Tone {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mark {
+    /// No diacritic.
     None = 0,
-    Hat = 1,   // â, ê, ô
-    Breve = 2, // ă
-    Horn = 3,  // ư, ơ
-    Dash = 4,  // đ
-    /// Not used by the current DSL, kept for parity with other ports.
+    /// Circumflex (Â, Ê, Ô).
+    Hat = 1,
+    /// Breve (Ă).
+    Breve = 2,
+    /// Horn (Ư, Ơ).
+    Horn = 3,
+    /// Dash (Đ).
+    Dash = 4,
+    /// Special mark for raw character restoration.
     Raw = 5,
 }
 
@@ -51,28 +62,37 @@ static TONES: Map<&'static str, Tone> = phf_map! {
     "DauHoi" => Tone::Hook,
 };
 
+/// A transformation rule that defines how a key press affects the composition.
 #[derive(Clone, Debug)]
 pub struct Rule {
+    /// The key that triggers this rule.
     pub key: char,
     /// Effect value:
-    /// - if `effect_type == ToneTransformation`: this is a `Tone` as `u8`
-    /// - if `effect_type == MarkTransformation`: this is a `Mark` as `u8`
+    /// - if `effect_type == ToneTransformation`: this is a [`Tone`] as `u8`
+    /// - if `effect_type == MarkTransformation`: this is a [`Mark`] as `u8`
     pub effect: u8,
+    /// The type of transformation to apply.
     pub effect_type: EffectType,
+    /// The character that this rule targets (to be replaced or marked).
     pub effect_on: char,
+    /// The resulting character after applying the transformation.
     pub result: char,
+    /// Additional rules to apply immediately after this one (used for multi-character shortcuts).
     pub appended_rules: Box<[Rule]>,
 }
 
 impl Rule {
+    /// Sets the effect value from a [`Tone`].
     pub fn set_tone(&mut self, tone: Tone) {
         self.effect = tone as u8;
     }
 
+    /// Sets the effect value from a [`Mark`].
     pub fn set_mark(&mut self, mark: Mark) {
         self.effect = mark as u8;
     }
 
+    /// Retrieves the effect value as a [`Tone`].
     pub fn get_tone(&self) -> Tone {
         // Safety: effect is created by parser or engine.
         match self.effect {
@@ -85,6 +105,7 @@ impl Rule {
         }
     }
 
+    /// Retrieves the effect value as a [`Mark`].
     pub fn get_mark(&self) -> Mark {
         match self.effect {
             1 => Mark::Hat,
@@ -103,11 +124,17 @@ impl Rule {
 /// standard Vietnamese input methods.
 #[derive(Clone, Debug, Default)]
 pub struct InputMethod {
+    /// The name of the input method.
     pub name: String,
+    /// The complete list of transformation rules.
     pub rules: Vec<Rule>,
+    /// Keys that can affect multiple vowels at once (e.g., 'w' in Telex).
     pub super_keys: Vec<char>,
+    /// Keys that apply tone marks.
     pub tone_keys: Vec<char>,
+    /// Keys that primarily append characters.
     pub appending_keys: Vec<char>,
+    /// All keys that have at least one rule associated with them.
     pub keys: Vec<char>,
 }
 
@@ -167,6 +194,7 @@ pub(crate) fn parse_input_method(im_name: &str) -> InputMethod {
         .unwrap_or_default()
 }
 
+/// Parses an input method definition from its structured format.
 pub(crate) fn parse_input_method_def(
     im_name: &str,
     im_def: &InputMethodDef,
@@ -213,6 +241,7 @@ fn contains_uo_case_insensitive(s: &str) -> bool {
     false
 }
 
+/// Parses rules for a given key based on its definition line.
 pub(crate) fn parse_rules(key: char, line: &str) -> Vec<Rule> {
     if let Some(tone) = TONES.get(line).copied() {
         return vec![Rule {
@@ -228,6 +257,7 @@ pub(crate) fn parse_rules(key: char, line: &str) -> Vec<Rule> {
     parse_toneless_rules(key, line)
 }
 
+/// Parses rules that don't involve tone transformations.
 pub(crate) fn parse_toneless_rules(key: char, line: &str) -> Vec<Rule> {
     let lower = line.to_lowercase();
 

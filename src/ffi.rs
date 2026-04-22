@@ -29,21 +29,30 @@ where
     f(guard.as_mut().unwrap())
 }
 
-/// Initializes the global engine.
+/// Initializes the global engine with the default Telex input method.
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_setup() {
     let mut guard = GLOBAL_ENGINE.lock().unwrap();
     *guard = Some(Engine::new(InputMethod::telex()));
 }
 
-/// Resets the global engine.
+/// Resets the global engine state, clearing the current composition.
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_reset() {
     with_engine(|e| e.reset());
 }
 
 /// Sets the input method for the global engine.
-/// 0: Telex, 1: VNI, 2: VIQR, 3: Microsoft, 4: Telex 2, 5: Telex W
+///
+/// # Arguments
+///
+/// * `method` - An integer representing the input method:
+///     * 0: Telex
+///     * 1: VNI
+///     * 2: VIQR
+///     * 3: Microsoft Layout
+///     * 4: Telex 2
+///     * 5: Telex W
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_set_input_method(method: i32) {
     let im = match method {
@@ -59,8 +68,17 @@ pub extern "C" fn bamboo_set_input_method(method: i32) {
     *guard = Some(Engine::new(im));
 }
 
-/// Processes a key and returns the full current word in UTF-8.
-/// The caller is responsible for freeing the returned string using `bamboo_free_string`.
+/// Processes a key and returns the full current word as a C-compatible string.
+///
+/// # Arguments
+///
+/// * `key` - The Unicode code point of the key to process.
+/// * `is_vietnamese` - Non-zero if the key should be processed as Vietnamese, zero for English mode.
+///
+/// # Returns
+///
+/// A pointer to a null-terminated UTF-8 string.
+/// **Note:** The caller is responsible for freeing the returned string using [`bamboo_free_string`].
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_process_key(
     key: u32,
@@ -77,7 +95,12 @@ pub extern "C" fn bamboo_process_key(
     })
 }
 
-/// Returns the current word output.
+/// Returns the current word output as a C-compatible string.
+///
+/// # Returns
+///
+/// A pointer to a null-terminated UTF-8 string.
+/// **Note:** The caller is responsible for freeing the returned string using [`bamboo_free_string`].
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_output() -> *mut c_char {
     with_engine(|e| {
@@ -86,13 +109,17 @@ pub extern "C" fn bamboo_output() -> *mut c_char {
     })
 }
 
-/// Removes the last character.
+/// Removes the last character from the current composition in the global engine.
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_remove_last_char() {
     with_engine(|e| e.remove_last_char(true));
 }
 
-/// Frees a string allocated by the engine.
+/// Frees a string allocated by the engine and returned via FFI.
+///
+/// # Safety
+///
+/// The provided pointer must have been returned by a `bamboo_*` function and not yet freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bamboo_free_string(s: *mut c_char) {
     if !s.is_null() {
@@ -104,8 +131,19 @@ pub unsafe extern "C" fn bamboo_free_string(s: *mut c_char) {
 
 // --- Instance-based API for multi-context support ---
 
+/// Opaque handle to a Bamboo Engine instance.
 pub type BambooEngine = Engine;
 
+/// Creates a new Bamboo Engine instance.
+///
+/// # Arguments
+///
+/// * `method` - An integer representing the input method (1: VNI, 2: VIQR, others: Telex).
+///
+/// # Returns
+///
+/// A pointer to the new [`BambooEngine`] instance.
+/// **Note:** The caller is responsible for freeing the engine using [`bamboo_engine_free`].
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
     let im = match method {
@@ -116,6 +154,11 @@ pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
     Box::into_raw(Box::new(Engine::new(im)))
 }
 
+/// Frees a Bamboo Engine instance created with [`bamboo_engine_new`].
+///
+/// # Safety
+///
+/// The provided pointer must be a valid pointer to a [`BambooEngine`] instance.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bamboo_engine_free(engine: *mut BambooEngine) {
     if !engine.is_null() {
@@ -125,6 +168,17 @@ pub unsafe extern "C" fn bamboo_engine_free(engine: *mut BambooEngine) {
     }
 }
 
+/// Processes a key using a specific engine instance.
+///
+/// # Arguments
+///
+/// * `engine` - A pointer to a [`BambooEngine`] instance.
+/// * `key` - The Unicode code point of the key to process.
+///
+/// # Returns
+///
+/// A pointer to a null-terminated UTF-8 string representing the current word.
+/// **Note:** The caller is responsible for freeing the returned string using [`bamboo_free_string`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bamboo_engine_process(
     engine: *mut BambooEngine,

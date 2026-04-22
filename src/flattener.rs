@@ -21,6 +21,16 @@ fn upper(c: char) -> char {
     }
 }
 
+/// Flattens a composition of transformation references into a single string.
+///
+/// # Arguments
+///
+/// * `composition` - A slice of references to [`Transformation`] objects.
+/// * `options` - [`OutputOptions`] to customize the resulting string.
+///
+/// # Returns
+///
+/// A `String` representing the processed text.
 pub fn flatten(
     composition: &[&Transformation],
     options: OutputOptions,
@@ -31,6 +41,16 @@ pub fn flatten(
     out
 }
 
+/// Flattens a slice of transformation objects into a single string.
+///
+/// # Arguments
+///
+/// * `composition` - A slice of [`Transformation`] objects.
+/// * `options` - [`OutputOptions`] to customize the resulting string.
+///
+/// # Returns
+///
+/// A `String` representing the processed text.
 pub(crate) fn flatten_slice(
     composition: &[Transformation],
     options: OutputOptions,
@@ -234,7 +254,10 @@ fn write_canvas_slice(
     }
 }
 
-#[allow(dead_code)]
+/// Finds the first character that would be visible in the output starting from a specific index in the composition.
+///
+/// This function resolves the character by applying all relevant transformations that target it
+/// within the suffix starting at `start`.
 pub(crate) fn first_canvas_char_in_suffix(
     composition: &[Transformation],
     start: usize,

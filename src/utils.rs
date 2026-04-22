@@ -1,5 +1,11 @@
+//! Utility functions for Vietnamese character manipulation.
+//!
+//! This module provides low-level tools for identifying vowels, adding tones,
+//! and managing diacritic marks.
+
 use phf::{Map, Set, phf_map, phf_set};
 
+/// A list of all Vietnamese vowels with their various tone marks.
 pub const VOWELS: &[char] = &[
     'a', 'à', 'á', 'ả', 'ã', 'ạ', 'ă', 'ằ', 'ắ', 'ẳ', 'ẵ', 'ặ', 'â', 'ầ', 'ấ',
     'ẩ', 'ẫ', 'ậ', 'e', 'è', 'é', 'ẻ', 'ẽ', 'ẹ', 'ê', 'ề', 'ế', 'ể', 'ễ', 'ệ',
@@ -57,26 +63,31 @@ static MARKS_MAPS: Map<char, [char; 5]> = phf_map! {
     'đ' => ['d','_','_','_','đ'],
 };
 
+/// Returns true if the character is a space.
 #[inline]
 pub fn is_space(c: char) -> bool {
     c == ' '
 }
 
+/// Returns true if the character is a common punctuation mark.
 #[inline]
 pub fn is_punctuation(c: char) -> bool {
     PUNCTUATION.contains(&c)
 }
 
+/// Returns true if the character should trigger a word break.
 #[inline]
 pub fn is_word_break_symbol(c: char) -> bool {
     is_punctuation(c) || c.is_ascii_digit()
 }
 
+/// Returns true if the character is a Vietnamese vowel.
 #[inline]
 pub fn is_vowel(c: char) -> bool {
     VOWELS_SET.contains(&c)
 }
 
+/// Returns true if the character is an ASCII alphabetic character.
 #[inline]
 pub fn is_alpha(c: char) -> bool {
     c.is_ascii_alphabetic()
@@ -92,6 +103,7 @@ fn find_tone_from_char(c: char) -> u8 {
     find_vowel_position(c).map(|pos| (pos % 6) as u8).unwrap_or(0)
 }
 
+/// Adds or changes the tone mark of a Vietnamese vowel.
 #[inline]
 pub fn add_tone_to_char(c: char, tone: u8) -> char {
     find_vowel_position(c)
@@ -102,6 +114,7 @@ pub fn add_tone_to_char(c: char, tone: u8) -> char {
         .unwrap_or(c)
 }
 
+/// Adds a diacritic mark to a toneless character.
 #[inline]
 pub fn add_mark_to_toneless_char(c: char, mark: u8) -> char {
     MARKS_MAPS
@@ -112,6 +125,7 @@ pub fn add_mark_to_toneless_char(c: char, mark: u8) -> char {
         .unwrap_or(c)
 }
 
+/// Adds a diacritic mark to a character while preserving its current tone.
 #[inline]
 pub fn add_mark_to_char(c: char, mark: u8) -> char {
     let tone = find_tone_from_char(c);
@@ -120,11 +134,14 @@ pub fn add_mark_to_char(c: char, mark: u8) -> char {
     add_tone_to_char(marked, tone)
 }
 
+/// Returns true if the character is a Vietnamese vowel with a tone mark
+/// or a diacritic mark.
 #[inline]
 pub fn is_vietnamese_rune(c: char) -> bool {
     find_tone_from_char(c) != 0 || c != add_mark_to_toneless_char(c, 0)
 }
 
+/// Returns true if the word contains at least one Vietnamese-specific character.
 #[allow(unused)]
 #[inline]
 pub fn has_any_vietnamese_rune(word: &str) -> bool {
@@ -137,6 +154,7 @@ pub fn has_any_vietnamese_rune(word: &str) -> bool {
     })
 }
 
+/// Returns true if the word contains at least one Vietnamese vowel.
 #[allow(unused)]
 #[inline]
 pub fn has_any_vietnamese_vowel(word: &str) -> bool {

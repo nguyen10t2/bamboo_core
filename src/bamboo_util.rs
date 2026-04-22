@@ -7,7 +7,9 @@ use crate::utils::{
     add_mark_to_char, add_tone_to_char, is_alpha, is_space, is_vowel,
 };
 
+/// Flag to enable free tone marking (allows placing tones at any time).
 pub(crate) const EFREE_TONE_MARKING: u32 = 1 << 0;
+/// Flag to use the standard Vietnamese tone style (e.g., placing tone on the second vowel in some cases).
 pub(crate) const ESTD_TONE_STYLE: u32 = 1 << 1;
 
 #[inline]
@@ -28,6 +30,7 @@ fn in_key_list(keys: Option<&[char]>, key: char) -> bool {
     keys.map(|ks| ks.contains(&key)).unwrap_or(false)
 }
 
+/// Finds the index of the last transformation that resulted in an appended character.
 pub(crate) fn find_last_appending_trans_idx(
     composition: &[Transformation],
 ) -> Option<usize> {
@@ -39,6 +42,7 @@ pub(crate) fn find_last_appending_trans_idx(
         .map(|(idx, _)| idx)
 }
 
+/// Finds the last transformation in the composition that resulted in an appended character.
 pub(crate) fn find_last_appending_trans<'a>(
     composition: &'a [&'a Transformation],
 ) -> Option<&'a Transformation> {
@@ -49,6 +53,7 @@ pub(crate) fn find_last_appending_trans<'a>(
         .find(|trans| trans.rule.effect_type == EffectType::Appending)
 }
 
+/// Splits the composition into two parts: everything before the last syllable and the last syllable itself.
 pub(crate) fn extract_last_syllable<'a>(
     composition: &'a [Transformation],
     _keys: Option<&[char]>,
@@ -75,6 +80,7 @@ pub(crate) fn extract_last_syllable<'a>(
     (composition[..idx].iter().collect(), composition[idx..].iter().collect())
 }
 
+/// Creates a new transformation that simply appends a character.
 pub(crate) fn new_appending_trans(
     key: char,
     is_upper_case: bool,
@@ -93,6 +99,7 @@ pub(crate) fn new_appending_trans(
     }
 }
 
+/// Generates an appending transformation based on the provided rules and key.
 pub(crate) fn generate_appending_trans(
     rules: &[Rule],
     lower_key: char,
@@ -144,6 +151,7 @@ fn idx_of(
     composition.iter().position(|t| std::ptr::eq(*t, needle))
 }
 
+/// Checks if the current composition represents a valid Vietnamese syllable.
 pub(crate) fn is_valid(
     composition: &[&Transformation],
     input_is_full_complete: bool,
@@ -403,6 +411,7 @@ fn extract_cvc_trans<'a>(
     (fc, vo, lc)
 }
 
+/// Extracts the last word along with its punctuation marks from the composition.
 pub(crate) fn extract_last_word_with_punctuation_marks_refs<'a>(
     composition: &[&'a Transformation],
     _effect_keys: &[char],
@@ -429,6 +438,7 @@ pub(crate) fn extract_last_word_with_punctuation_marks_refs<'a>(
     (Vec::new(), composition.to_vec())
 }
 
+/// Extracts the last word from the composition.
 pub(crate) fn extract_last_word<'a>(
     composition: &[&'a Transformation],
     effect_keys: Option<&[char]>,
@@ -576,6 +586,7 @@ fn find_mark_target(
     (None, None)
 }
 
+/// Finds the target for a given transformation rule within the current composition.
 pub(crate) fn find_target(
     composition: &[&Transformation],
     applicable_rules: &[Rule],
@@ -744,6 +755,7 @@ fn contains_uho(s: &str) -> bool {
     s.contains("ưo") || s.contains("ươ")
 }
 
+/// Generates a list of transformations to apply based on the current composition and rules.
 pub(crate) fn generate_transformations(
     composition: &[&Transformation],
     applicable_rules: &[Rule],
@@ -867,6 +879,7 @@ pub(crate) fn generate_transformations(
     transformations
 }
 
+/// Generates fallback transformations when no specific rules match.
 pub(crate) fn generate_fallback_transformations(
     applicable_rules: &[Rule],
     lower_key: char,
@@ -894,6 +907,7 @@ pub(crate) fn generate_fallback_transformations(
     transformations
 }
 
+/// "Breaks" a composition by converting all non-virtual transformations into simple appending ones.
 pub(crate) fn break_composition_slice(
     composition: &[Transformation],
 ) -> Vec<Transformation> {
@@ -907,6 +921,7 @@ pub(crate) fn break_composition_slice(
     result
 }
 
+/// Updates the tone target in the composition based on the current syllable structure and tone style.
 pub(crate) fn refresh_last_tone_target(
     composition: &mut [Transformation],
     std_style: bool,

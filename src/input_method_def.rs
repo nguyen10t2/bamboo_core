@@ -1,5 +1,6 @@
 use phf::{Map, phf_map};
 
+/// Maps a key to its corresponding Vietnamese input transformation name.
 pub type InputMethodDef = Map<&'static str, &'static str>;
 
 static TELEX: InputMethodDef = phf_map! {
@@ -180,10 +181,12 @@ static INPUT_METHOD_DEFS: Map<&'static str, &'static InputMethodDef> = phf_map! 
     "Telex W" => &TELEX_W,
 };
 
+/// Retrieves an input method definition by its name.
 pub fn get_input_method(name: &str) -> Option<&'static InputMethodDef> {
     INPUT_METHOD_DEFS.get(name).copied()
 }
 
+/// Returns all available input method definitions.
 pub fn get_input_method_definitions()
 -> &'static Map<&'static str, &'static InputMethodDef> {
     &INPUT_METHOD_DEFS

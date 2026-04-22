@@ -110,6 +110,18 @@ fn is_valid_vc(vo_mask: u16, lc_mask: u16) -> bool {
     false
 }
 
+/// Validates a Vietnamese syllable based on its Consonant-Vowel-Consonant (CVC) structure.
+///
+/// # Arguments
+///
+/// * `fc` - First consonant(s).
+/// * `vo` - Vowel(s).
+/// * `lc` - Last consonant(s).
+/// * `full` - Whether the input is considered complete (affects strictness of matching).
+///
+/// # Returns
+///
+/// `true` if the combination forms a valid (or potentially valid) Vietnamese syllable.
 pub fn is_valid_cvc(fc: &str, vo: &str, lc: &str, full: bool) -> bool {
     let fc_mask = if !fc.is_empty() {
         let m =

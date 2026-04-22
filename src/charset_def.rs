@@ -1,5 +1,8 @@
+//! Definitions and utilities for various Vietnamese charsets.
+
 use phf::{Map, phf_map};
 
+/// A map representing a Vietnamese character set, mapping Unicode characters to their encoded strings.
 pub type CharsetDefinition = Map<char, &'static str>;
 
 static CHARSET_1: CharsetDefinition = phf_map! {
@@ -2181,12 +2184,16 @@ static CHARSET_DEFINITIONS: Map<&'static str, &'static CharsetDefinition> = phf_
     "Unicode C string Decimal" => &CHARSET_16,
 };
 
+/// Retrieves a character set definition by its name.
+///
+/// Returns `None` if the charset name is not recognized.
 pub fn get_charset_definition(
     name: &str,
 ) -> Option<&'static CharsetDefinition> {
     CHARSET_DEFINITIONS.get(name).copied()
 }
 
+/// Returns a map of all available character set definitions.
 pub fn get_charset_definitions()
 -> &'static Map<&'static str, &'static CharsetDefinition> {
     &CHARSET_DEFINITIONS
