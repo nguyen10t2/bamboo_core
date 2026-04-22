@@ -254,6 +254,7 @@ fn write_canvas_slice(
     }
 }
 
+#[allow(dead_code)]
 /// Finds the first character that would be visible in the output starting from a specific index in the composition.
 ///
 /// This function resolves the character by applying all relevant transformations that target it
