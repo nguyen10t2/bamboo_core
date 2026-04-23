@@ -6,25 +6,27 @@
 
 A high-performance Vietnamese input method engine (IME) core written in Rust, inherited and optimized from the original [bamboo-core](https://github.com/BambooEngine/bamboo-core) in Go.
 
-## 🚀 Version 0.3.2: The DFA Revolution
+## 🚀 Version 0.3.3: High-Performance Snapshot
 
-This version introduces a **major architectural overhaul** inspired by Deterministic Finite Automata (DFA) and high-performance engines like `uvie-rs`.
+This version marks a significant milestone in efficiency and stability, achieving a **Zero-Allocation Hot Path** while maintaining absolute linguistic correctness.
 
-- **Lazy JIT DFA Engine:** 20x performance improvement (~490µs -> ~25µs per processing cycle).
-- **Zero-Allocation Core:** Optimized transformation generation using stack buffers.
-- **Fast O(N) Validation:** Improved spelling and syllable validation algorithm.
-- **Hybrid Architecture:** Combines the flexibility of a rule engine with the speed of static lookups.
+### Key Enhancements:
+- **Zero-Allocation Processing:** Replaced `Vec` with stack-allocated `TransformationStack` for all intermediate processing, making the engine ideal for WASM and embedded systems.
+- **Lazy JIT DFA Engine:** 20x performance improvement (~490µs -> ~23µs per processing cycle) through dynamic state caching.
+- **Robust State Recovery:** Completely refactored `remove_last_char` and backspace logic to ensure the internal DFA state and transformation targets are always perfectly synchronized.
+- **Pre-compilation Support:** New `Engine::warm_up()` method to pre-populate the DFA with common Vietnamese syllables.
+- **Optimized Validation:** High-performance single-pass O(N) spelling and syllable validation.
 
 ## 💡 Origin & Philosophy
 
 This project is a high-performance Rust port of the **Bamboo** Vietnamese engine, originally developed by **Luong Thanh Lam**.
 
-Bamboo aims to provide a flexible Vietnamese typing solution based on **rule-based transformations** rather than hardcoded logic. This approach allows the engine to easily adapt to various typing styles and support modern features like free-style typing and intelligent spell checking.
+Bamboo provides a flexible Vietnamese typing solution based on **rule-based transformations**. This approach allows the engine to easily adapt to various typing styles (Telex, VNI, VIQR) and support modern features like free-style typing and intelligent spell checking.
 
 The core philosophy is inspired by:
-- **[bogo.js](https://github.com/lewtds/bogo.js)**: A pioneering project by **Trung Ngo**, introducing the transformation model.
-- **GoTiengViet**: A classic engine by **Tran Ky Nam**, the gold standard for accuracy and user experience.
-- **[NexusKey](https://github.com/phatMT97/NexusKey)**: Optimization techniques from **Mai Thanh Phát**.
+- **[bogo.js](https://github.com/lewtds/bogo.js)**: Pioneering the transformation model.
+- **GoTiengViet**: The gold standard for accuracy and user experience.
+- **[NexusKey](https://github.com/phatMT97/NexusKey)**: Modern state machine and array optimization techniques.
 
 ## 📦 Installation
 
@@ -32,7 +34,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bamboo-core = "0.3.2"
+bamboo-core = "0.3.3"
 ```
 
 ## 🛠️ Quick Start
@@ -42,18 +44,13 @@ use bamboo_core::{Engine, Mode, InputMethod};
 
 fn main() {
     let mut engine = Engine::new(InputMethod::telex());
-    engine.process_str("tieengs", Mode::Vietnamese);
-    println!("Output: {}", engine.output()); // Result: "tiếng"
+    
+    // Optional: Boost initial performance
+    engine.warm_up();
+    
+    let word = engine.process("tieengs", Mode::Vietnamese);
+    println!("Output: {}", word); // Result: "tiếng"
 }
-```
-
-## 🧩 Delta API for IMEs
-
-Efficiently update your IME buffer using the Delta API:
-
-```rust
-let (backspaces, _, inserted) = engine.process_key_delta('s', Mode::Vietnamese);
-// Result: backspaces = 1 (delete 'a'), inserted = "á"
 ```
 
 ## 👥 Credits

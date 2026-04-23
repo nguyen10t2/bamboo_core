@@ -4,21 +4,24 @@ use crate::config::Config;
 use crate::input_method::{InputMethod, Rule};
 use crate::mode::{Mode, OutputOptions};
 
+/// Maximum number of active transformations in a single syllable.
 pub const MAX_ACTIVE_TRANS: usize = 24;
 
 /// Represents a single keypress or a transformation derived from it (e.g., adding a mark or tone).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
 pub struct Transformation {
-    /// The rule that was applied.
+    /// The rule that was applied to create this transformation.
     pub rule: Rule,
     /// The index of the transformation in the composition that this transformation targets (if any).
     /// For example, a tone mark transformation targets an earlier vowel.
     pub target: Option<usize>,
-    /// Whether the resulting character should be uppercase.
+    /// Whether the resulting character should be rendered as uppercase.
     pub is_upper_case: bool,
 }
 
-/// A stack-allocated buffer for transformations to avoid heap allocations.
+/// A stack-allocated buffer for transformations to avoid heap allocations in the hot path.
+///
+/// This structure uses a fixed-size array and is extremely fast for frequent updates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
 pub struct TransformationStack {
     data: [Transformation; MAX_ACTIVE_TRANS],
@@ -26,10 +29,13 @@ pub struct TransformationStack {
 }
 
 impl TransformationStack {
+    /// Creates a new, empty transformation stack.
     pub fn new() -> Self {
         Self { data: [Transformation::default(); MAX_ACTIVE_TRANS], len: 0 }
     }
 
+    /// Pushes a new transformation onto the stack.
+    /// Does nothing if the stack is full.
     pub fn push(&mut self, t: Transformation) {
         if self.len < MAX_ACTIVE_TRANS {
             self.data[self.len] = t;
@@ -37,6 +43,8 @@ impl TransformationStack {
         }
     }
 
+    /// Removes and returns the last transformation from the stack.
+    #[allow(dead_code)]
     pub fn pop(&mut self) -> Option<Transformation> {
         if self.len > 0 {
             self.len -= 1;
@@ -46,26 +54,32 @@ impl TransformationStack {
         }
     }
 
+    /// Clears all transformations from the stack.
     pub fn clear(&mut self) {
         self.len = 0;
     }
 
+    /// Returns the number of transformations currently in the stack.
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// Returns true if the stack contains no transformations.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    /// Returns a slice containing all transformations in the stack.
     pub fn as_slice(&self) -> &[Transformation] {
         &self.data[..self.len]
     }
 
+    /// Returns a mutable slice containing all transformations in the stack.
     pub fn as_mut_slice(&mut self) -> &mut [Transformation] {
         &mut self.data[..self.len]
     }
 
+    /// Appends a slice of transformations to the stack.
     pub fn extend_from_slice(&mut self, other: &[Transformation]) {
         let to_copy = other.len().min(MAX_ACTIVE_TRANS - self.len);
         if to_copy > 0 {
@@ -74,6 +88,7 @@ impl TransformationStack {
         }
     }
 
+    /// Drains transformations from a starting index into another stack.
     pub fn drain_to(&mut self, start: usize, target: &mut TransformationStack) {
         target.clear();
         if start < self.len {
@@ -108,6 +123,7 @@ fn uoh_tail_match(s: &str) -> bool {
 /// The main stateful processor of the Vietnamese Input Method Engine.
 ///
 /// It maintains an internal buffer of transformations and produces the correctly marked Vietnamese text.
+/// The engine uses a hybrid approach combining a Rule Engine with a Lazy JIT DFA for peak performance.
 pub struct Engine {
     committed_text: String,
     /// Stack-allocated buffer for the active composition to avoid heap allocations.
@@ -122,7 +138,7 @@ pub struct Engine {
     non_ascii_effect_keys: Vec<char>,
     config: Config,
 
-    // Scratch buffers to avoid per-keystroke heap allocations.
+    // Stack buffers to avoid per-keystroke heap allocations.
     work_comp: TransformationStack,
     scratch_comp: TransformationStack,
 
@@ -294,27 +310,32 @@ impl Engine {
                 &mut trans_buf,
             );
 
-            let mut tmp_comp = *composition;
-            tmp_comp.extend_from_slice(trans_buf.as_slice());
+            // Temporary combined data to avoid full struct copy
+            let combined_len = composition.len() + trans_buf.len();
+            if combined_len <= MAX_ACTIVE_TRANS {
+                let mut tmp_data = [Transformation::default(); MAX_ACTIVE_TRANS];
+                tmp_data[..composition.len()].copy_from_slice(composition.as_slice());
+                tmp_data[composition.len()..combined_len].copy_from_slice(trans_buf.as_slice());
 
-            if !self.input_method.super_keys.is_empty() {
-                let current_str = crate::flattener::flatten_slice(
-                    tmp_comp.as_slice(),
-                    OutputOptions::TONE_LESS | OutputOptions::LOWER_CASE,
-                );
-                if uoh_tail_match(&current_str) {
-                    let (target, rule) = crate::bamboo_util::find_target(
-                        tmp_comp.as_slice(),
-                        self.get_applicable_rules(self.input_method.super_keys[0]),
-                        self.config.to_flags(),
+                if !self.input_method.super_keys.is_empty() {
+                    let current_str = crate::flattener::flatten_slice(
+                        &tmp_data[..combined_len],
+                        OutputOptions::TONE_LESS | OutputOptions::LOWER_CASE,
                     );
-                    if let (Some(target), Some(mut rule)) = (target, rule) {
-                        rule.key = '\0';
-                        trans_buf.push(Transformation {
-                            rule,
-                            target: Some(target),
-                            is_upper_case: false,
-                        });
+                    if uoh_tail_match(&current_str) {
+                        let (target, rule) = crate::bamboo_util::find_target(
+                            &tmp_data[..combined_len],
+                            self.get_applicable_rules(self.input_method.super_keys[0]),
+                            self.config.to_flags(),
+                        );
+                        if let (Some(target), Some(mut rule)) = (target, rule) {
+                            rule.key = '\0';
+                            trans_buf.push(Transformation {
+                                rule,
+                                target: Some(target),
+                                is_upper_case: false,
+                            });
+                        }
                     }
                 }
             }
@@ -389,7 +410,9 @@ impl Engine {
         composition.extend_from_slice(scratch.as_slice());
     }
 
-    /// Processes a string of characters and returns the current active word.
+    /// Processes a string of characters and returns the resulting active word.
+    ///
+    /// This is a convenience wrapper around [`Self::process_str`] and [`Self::output`].
     pub fn process(&mut self, s: &str, mode: Mode) -> String {
         self.process_str(s, mode).output()
     }
@@ -625,28 +648,24 @@ impl Engine {
     /// Removes the last character from the active composition.
     pub fn remove_last_char(&mut self, refresh_last_tone_target: bool) {
         let mut work = self.work_comp;
+        let mut scratch = self.scratch_comp;
 
         self.take_active_into(&mut work);
-        let last_appending_idx = crate::bamboo_util::find_last_appending_trans_idx(work.as_slice());
-        let Some(last_idx) = last_appending_idx else {
+
+        // Find the last physical keystroke (non-virtual transformation)
+        let last_key_idx = work
+            .as_slice()
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, t)| t.rule.key != '\0')
+            .map(|(i, _)| i);
+
+        let Some(idx) = last_key_idx else {
             self.set_active_from_stack(&mut work);
             self.current_state_id = 0;
             return;
         };
-
-        let last_appending_key = work.as_slice()[last_idx].rule.key;
-        if !self.can_process_key_raw(last_appending_key) {
-            work.pop();
-            self.set_active_from_stack(&mut work);
-            self.current_state_id = 0;
-            return;
-        }
-
-        if work.is_empty() {
-            self.set_active_from_stack(&mut work);
-            self.current_state_id = 0;
-            return;
-        }
 
         let (prev_slice, last_comb_slice) =
             crate::bamboo_util::extract_last_word(work.as_slice(), Some(&self.input_method.keys));
@@ -655,35 +674,38 @@ impl Engine {
         previous.extend_from_slice(prev_slice);
 
         let last_comb = last_comb_slice;
+        let idx_in_last = idx as isize - prev_slice.len() as isize;
 
-        let mut new_comb_stack = TransformationStack::new();
-        let prev_len = previous.len();
+        let mut new_word_comp = TransformationStack::new();
         for (i, t) in last_comb.iter().enumerate() {
-            let actual_idx = prev_len + i;
-            if actual_idx == last_idx {
-                continue;
+            if i as isize == idx_in_last {
+                continue; // Skip the physical key being deleted
             }
-            if let Some(target) = t.target
-                && target == last_idx
-            {
-                continue;
+            if t.rule.key == '\0' {
+                continue; // Skip virtual ones
             }
-            new_comb_stack.push(*t);
+            // Re-type the key
+            self.new_composition_in_place(
+                &mut new_word_comp,
+                &mut scratch,
+                t.rule.key,
+                t.is_upper_case,
+            );
         }
 
         if refresh_last_tone_target {
             let mut extra = TransformationStack::new();
             crate::bamboo_util::refresh_last_tone_target_into(
-                new_comb_stack.as_mut_slice(),
+                new_word_comp.as_mut_slice(),
                 self.config.to_flags() & crate::bamboo_util::ESTD_TONE_STYLE != 0,
                 &mut extra,
             );
-            new_comb_stack.extend_from_slice(extra.as_slice());
+            new_word_comp.extend_from_slice(extra.as_slice());
         }
 
-        previous.extend_from_slice(new_comb_stack.as_slice());
+        previous.extend_from_slice(new_word_comp.as_slice());
         self.set_active_from_stack(&mut previous);
-        self.current_state_id = 0;
+        self.current_state_id = self.dfa.find_state(self.active_slice()).unwrap_or(0);
     }
 
     /// Resets the engine state, clearing committed and active text.

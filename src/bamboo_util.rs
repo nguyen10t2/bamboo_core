@@ -26,16 +26,6 @@ fn in_key_list(keys: Option<&[char]>, key: char) -> bool {
     keys.map(|ks| ks.contains(&key)).unwrap_or(false)
 }
 
-/// Finds the index of the last transformation that resulted in an appended character.
-pub(crate) fn find_last_appending_trans_idx(composition: &[Transformation]) -> Option<usize> {
-    composition
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, trans)| trans.rule.effect_type == EffectType::Appending)
-        .map(|(idx, _)| idx)
-}
-
 /// Finds the last transformation in the composition that resulted in an appended character.
 pub(crate) fn find_last_appending_trans(composition: &[Transformation]) -> Option<Transformation> {
     composition.iter().rev().find(|trans| trans.rule.effect_type == EffectType::Appending).copied()

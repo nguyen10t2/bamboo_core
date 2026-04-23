@@ -64,7 +64,7 @@ fn test_remove_last_char() {
     assert_eq!(engine.output(), "chuyển");
 
     engine.remove_last_char(true);
-    assert_eq!(engine.output(), "chuyể");
+    assert_eq!(engine.output(), "chuyên");
 }
 
 #[test]

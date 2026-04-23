@@ -4,9 +4,16 @@
 //! [bamboo-core](https://github.com/BambooEngine/bamboo-core) in Go.
 //!
 //! This crate provides the foundational logic for processing Vietnamese text, supporting
-//! various input methods like Telex, VNI, and VIQR. It is designed to be fast,
+//! various input methods like Telex, VNI, and VIQR. It is designed to be extremely fast,
 //! memory-efficient (zero-allocation in core processing), and easy to integrate into
 //! UI applications or other text processing tools.
+//!
+//! ## Core Features
+//!
+//! - **Hybrid Engine**: Combines rule-based flexibility with DFA-based speed.
+//! - **Zero-Allocation**: Core processing path avoids heap allocations for maximum performance.
+//! - **Lazy JIT DFA**: Learns and caches syllable states on-the-fly.
+//! - **WASM Ready**: Optimized for web and constrained environments.
 //!
 //! ## Core Concepts
 //!
@@ -27,14 +34,17 @@
 //! // Create an engine with the standard Telex input method
 //! let mut engine = Engine::new(InputMethod::telex());
 //!
-//! // Process a string of keys
-//! engine.process_str("tieengs", Mode::Vietnamese);
-//! assert_eq!(engine.output(), "tiếng");
+//! // Optional: pre-populate DFA for peak performance
+//! engine.warm_up();
+//!
+//! // Process a string and get the output immediately
+//! let word = engine.process("tieengs", Mode::Vietnamese);
+//! assert_eq!(word, "tiếng");
 //!
 //! // Reset for a new word
 //! engine.reset();
-//! engine.process_str("vieetj", Mode::Vietnamese);
-//! assert_eq!(engine.output(), "việt");
+//! let word2 = engine.process("vieetj", Mode::Vietnamese);
+//! assert_eq!(word2, "việt");
 //! ```
 //!
 //! ## Advanced Usage
@@ -56,7 +66,7 @@
 //!
 //! ### Handling Backspaces
 //!
-//! The engine supports removing the last transformation:
+//! The engine supports removing the last transformation while maintaining DFA consistency:
 //!
 //! ```rust
 //! # use bamboo_core::{Engine, Mode, InputMethod};
@@ -64,9 +74,9 @@
 //! engine.process_str("chuyeenr", Mode::Vietnamese);
 //! assert_eq!(engine.output(), "chuyển");
 //!
-//! // remove_last_char removes the last 'appending' character and its marks
+//! // remove_last_char removes the last physical keystroke and its effects
 //! engine.remove_last_char(true);
-//! assert_eq!(engine.output(), "chuyể");
+//! assert_eq!(engine.output(), "chuyên");
 //! ```
 
 mod bamboo_util;
@@ -86,16 +96,16 @@ pub mod ffi;
 pub mod wasm;
 
 pub use config::Config;
-pub use engine::Engine;
+pub use engine::{Engine, Transformation, TransformationStack};
 pub use input_method::InputMethod;
 pub use mode::{Mode, OutputOptions};
 
 /// Advanced types for low-level interaction with the engine.
 ///
-/// This module exposes internal structures like [`crate::advanced::Transformation`] and raw definitions
+/// This module exposes internal structures and raw definitions
 /// for users who need to build custom input methods or analyze the composition state.
 pub mod advanced {
-    pub use crate::engine::Transformation;
+    pub use crate::engine::{MAX_ACTIVE_TRANS, Transformation, TransformationStack};
     pub use crate::input_method::{EffectType, Mark, Rule, Tone};
     pub use crate::mode::OutputOptions;
 
