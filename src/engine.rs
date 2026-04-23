@@ -5,7 +5,7 @@ use crate::input_method::{InputMethod, Rule};
 use crate::mode::{Mode, OutputOptions};
 
 /// Maximum number of active transformations in a single syllable.
-pub const MAX_ACTIVE_TRANS: usize = 24;
+pub const MAX_ACTIVE_TRANS: usize = 16;
 
 /// Represents a single keypress or a transformation derived from it (e.g., adding a mark or tone).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
