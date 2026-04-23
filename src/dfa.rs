@@ -5,32 +5,26 @@ use crate::input_method::InputMethod;
 use std::collections::HashMap;
 
 /// A DFA state representing a unique syllable composition.
-///
-/// Each state stores transitions to next states based on ASCII keys
-/// and the corresponding transformation stack (composition).
 #[derive(Clone, Debug)]
 pub struct State {
     /// State transition table for 128 ASCII characters.
-    /// A value of 0 indicates no transition or fallback to the Rule Engine.
     pub transitions: [u32; 128],
-    /// The transformation stack that makes up this state.
-    pub composition: Box<[Transformation]>,
+    /// Start index in the DFA arena.
+    pub comp_offset: u32,
+    /// Number of transformations in this state.
+    pub comp_len: u8,
 }
 
 impl Default for State {
     fn default() -> Self {
-        Self { transitions: [0; 128], composition: Box::new([]) }
+        Self { transitions: [0; 128], comp_offset: 0, comp_len: 0 }
     }
 }
 
-/// The DFA (Deterministic Finite Automaton) core that manages states and transitions.
-///
-/// This DFA supports a Lazy JIT mechanism, allowing the Engine to learn new states
-/// during execution to optimize performance.
+/// The DFA core that manages states and transitions with Arena Allocation.
 pub struct Dfa {
-    /// List of states in the DFA.
     pub states: Vec<State>,
-    /// Hash map mapping transformation stacks to state IDs to avoid duplicates.
+    pub arena: Vec<Transformation>,
     pub composition_to_state: HashMap<Box<[Transformation]>, u32>,
 }
 
@@ -41,98 +35,86 @@ impl Default for Dfa {
 }
 
 impl Dfa {
-    /// Creates a new DFA with an initial empty state (empty syllable).
+    /// Creates a new DFA with an initial empty state.
     pub fn new() -> Self {
-        let mut dfa =
-            Self { states: Vec::with_capacity(1024), composition_to_state: HashMap::new() };
-        // Initial empty state
-        let empty_comp = Box::new([]);
+        let mut dfa = Self {
+            states: Vec::with_capacity(1024),
+            arena: Vec::with_capacity(4096),
+            composition_to_state: HashMap::new(),
+        };
+        let empty_comp: Box<[Transformation]> = Box::new([]);
         dfa.states.push(State::default());
         dfa.composition_to_state.insert(empty_comp, 0);
         dfa
     }
 
-    /// Retrieves a reference to a state by its ID.
     pub fn get_state(&self, id: u32) -> &State {
         &self.states[id as usize]
     }
 
-    /// Adds a new state to the DFA from a transformation stack.
-    /// If the state already exists, it returns the existing state ID.
+    pub fn get_composition(&self, state_id: u32) -> &[Transformation] {
+        let state = &self.states[state_id as usize];
+        let start = state.comp_offset as usize;
+        let end = start + state.comp_len as usize;
+        &self.arena[start..end]
+    }
+
     pub fn add_state(&mut self, composition: &[Transformation]) -> u32 {
-        let comp_box: Box<[Transformation]> = composition.to_vec().into_boxed_slice();
-        if let Some(&id) = self.composition_to_state.get(&comp_box) {
+        if let Some(&id) = self.composition_to_state.get(composition) {
             return id;
         }
 
         let id = self.states.len() as u32;
-        self.states.push(State { transitions: [0; 128], composition: comp_box.clone() });
-        self.composition_to_state.insert(comp_box, id);
+        let comp_offset = self.arena.len() as u32;
+        let comp_len = composition.len() as u8;
+
+        self.arena.extend_from_slice(composition);
+        self.states.push(State { transitions: [0; 128], comp_offset, comp_len });
+
+        self.composition_to_state.insert(composition.to_vec().into_boxed_slice(), id);
         id
     }
 
-    /// Finds the state ID corresponding to a transformation stack.
     pub fn find_state(&self, composition: &[Transformation]) -> Option<u32> {
         self.composition_to_state.get(composition).copied()
     }
 }
 
 /// A DFA compiler that supports pre-initializing common states.
-#[allow(dead_code)]
 pub struct DfaCompiler<'a> {
     pub input_method: &'a InputMethod,
     pub flags: u32,
-    pub composition_to_state: HashMap<Vec<Transformation>, u32>,
     pub dfa: Dfa,
 }
 
-#[allow(dead_code)]
 impl<'a> DfaCompiler<'a> {
     pub fn new(im: &'a InputMethod, flags: u32) -> Self {
-        let mut compiler =
-            Self { input_method: im, flags, composition_to_state: HashMap::new(), dfa: Dfa::new() };
-        compiler.composition_to_state.insert(Vec::new(), 0);
-        compiler
+        Self { input_method: im, flags, dfa: Dfa::new() }
     }
 
-    /// Compiles common Vietnamese syllables into the DFA to reduce initial latency.
+    /// Compiles common Vietnamese syllables into the DFA.
     pub fn compile_common(&mut self) {
-        let vowels = ['a', 'e', 'i', 'o', 'u', 'y'];
-        let tones = ['s', 'f', 'r', 'x', 'j']; // Telex tone keys
+        let fc = [
+            "", "b", "c", "ch", "d", "dd", "g", "gh", "h", "k", "kh", "l", "m", "n", "nh", "ng",
+            "ngh", "p", "ph", "q", "r", "s", "t", "th", "tr", "v", "x",
+        ];
+        let vowels = [
+            "a", "e", "i", "o", "u", "y", "aa", "ee", "oo", "aw", "ow", "uw", "ai", "ao", "au",
+            "ay", "ie", "oa", "oe", "oi", "ua", "ue", "ui", "uo", "uy",
+        ];
+        let tones = ["", "s", "f", "r", "x", "j"];
 
-        // Compile single vowels and basic tone combinations
-        for &v in &vowels {
-            self.simulate_key(v);
-            for &t in &tones {
-                self.simulate_sequence(&[v, t]);
+        for &f in &fc {
+            for &v in &vowels {
+                for &t in &tones {
+                    let mut seq = String::with_capacity(8);
+                    seq.push_str(f);
+                    seq.push_str(v);
+                    seq.push_str(t);
+                    self.simulate_str(&seq);
+                }
             }
         }
-
-        // Common double vowel combinations
-        let double_vowels = ["aa", "ee", "oo", "aw", "ow", "uw"];
-        for s in double_vowels {
-            self.simulate_str(s);
-        }
-    }
-
-    fn simulate_key(&mut self, key: char) -> u32 {
-        let mut engine = crate::Engine::with_config(
-            self.input_method.clone(),
-            crate::Config::from_flags(self.flags),
-        );
-        engine.process_key(key, crate::Mode::Vietnamese);
-        self.dfa.add_state(engine.active_slice())
-    }
-
-    fn simulate_sequence(&mut self, keys: &[char]) -> u32 {
-        let mut engine = crate::Engine::with_config(
-            self.input_method.clone(),
-            crate::Config::from_flags(self.flags),
-        );
-        for &k in keys {
-            engine.process_key(k, crate::Mode::Vietnamese);
-        }
-        self.dfa.add_state(engine.active_slice())
     }
 
     fn simulate_str(&mut self, s: &str) {
@@ -140,9 +122,21 @@ impl<'a> DfaCompiler<'a> {
             self.input_method.clone(),
             crate::Config::from_flags(self.flags),
         );
+
+        let mut current_state = 0u32;
         for k in s.chars() {
+            if !k.is_ascii() {
+                continue;
+            }
+
+            let prev_state = current_state;
             engine.process_key(k, crate::Mode::Vietnamese);
+
+            let comp = engine.active_slice();
+            current_state = self.dfa.add_state(comp);
+
+            // Link the transition
+            self.dfa.states[prev_state as usize].transitions[k as usize] = current_state;
         }
-        self.dfa.add_state(engine.active_slice());
     }
 }

@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::input_method::{InputMethod, Rule};
 use crate::mode::{Mode, OutputOptions};
 
-const MAX_ACTIVE_TRANS: usize = 32;
+pub const MAX_ACTIVE_TRANS: usize = 24;
 
 /// Represents a single keypress or a transformation derived from it (e.g., adding a mark or tone).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
@@ -16,6 +16,71 @@ pub struct Transformation {
     pub target: Option<usize>,
     /// Whether the resulting character should be uppercase.
     pub is_upper_case: bool,
+}
+
+/// A stack-allocated buffer for transformations to avoid heap allocations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
+pub struct TransformationStack {
+    data: [Transformation; MAX_ACTIVE_TRANS],
+    len: usize,
+}
+
+impl TransformationStack {
+    pub fn new() -> Self {
+        Self { data: [Transformation::default(); MAX_ACTIVE_TRANS], len: 0 }
+    }
+
+    pub fn push(&mut self, t: Transformation) {
+        if self.len < MAX_ACTIVE_TRANS {
+            self.data[self.len] = t;
+            self.len += 1;
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<Transformation> {
+        if self.len > 0 {
+            self.len -= 1;
+            Some(self.data[self.len])
+        } else {
+            None
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.len = 0;
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn as_slice(&self) -> &[Transformation] {
+        &self.data[..self.len]
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [Transformation] {
+        &mut self.data[..self.len]
+    }
+
+    pub fn extend_from_slice(&mut self, other: &[Transformation]) {
+        let to_copy = other.len().min(MAX_ACTIVE_TRANS - self.len);
+        if to_copy > 0 {
+            self.data[self.len..self.len + to_copy].copy_from_slice(&other[..to_copy]);
+            self.len += to_copy;
+        }
+    }
+
+    pub fn drain_to(&mut self, start: usize, target: &mut TransformationStack) {
+        target.clear();
+        if start < self.len {
+            target.extend_from_slice(&self.data[start..self.len]);
+            self.len = start;
+        }
+    }
 }
 
 #[inline]
@@ -57,9 +122,9 @@ pub struct Engine {
     non_ascii_effect_keys: Vec<char>,
     config: Config,
 
-    // Scratch buffers to avoid per-keystroke allocations.
-    work_comp: Vec<Transformation>,
-    scratch_comp: Vec<Transformation>,
+    // Scratch buffers to avoid per-keystroke heap allocations.
+    work_comp: TransformationStack,
+    scratch_comp: TransformationStack,
 
     prev_preedit: String,
     delta_buf: String,
@@ -123,8 +188,8 @@ impl Engine {
             non_ascii_effect_keys,
             config,
 
-            work_comp: Vec::with_capacity(MAX_ACTIVE_TRANS),
-            scratch_comp: Vec::with_capacity(MAX_ACTIVE_TRANS),
+            work_comp: TransformationStack::new(),
+            scratch_comp: TransformationStack::new(),
 
             prev_preedit: String::with_capacity(64),
             delta_buf: String::with_capacity(64),
@@ -138,15 +203,15 @@ impl Engine {
         &self.active_buffer[..self.active_len]
     }
 
-    fn take_active_into(&mut self, out: &mut Vec<Transformation>) {
+    fn take_active_into(&mut self, out: &mut TransformationStack) {
         out.clear();
         out.extend_from_slice(self.active_slice());
         self.active_len = 0;
     }
 
-    fn set_active_from_vec(&mut self, src: &mut Vec<Transformation>) {
+    fn set_active_from_stack(&mut self, src: &mut TransformationStack) {
         self.active_len = src.len().min(MAX_ACTIVE_TRANS);
-        self.active_buffer[..self.active_len].copy_from_slice(&src[..self.active_len]);
+        self.active_buffer[..self.active_len].copy_from_slice(src.as_slice());
         src.clear();
     }
 
@@ -163,6 +228,15 @@ impl Engine {
     /// Returns a copy of the current input method.
     pub fn input_method(&self) -> InputMethod {
         self.input_method.clone()
+    }
+
+    /// Warms up the DFA by pre-compiling common Vietnamese syllables.
+    /// This reduces latency for the first time these syllables are typed.
+    pub fn warm_up(&mut self) {
+        let mut compiler = crate::dfa::DfaCompiler::new(&self.input_method, self.config.to_flags());
+        compiler.compile_common();
+        self.dfa = compiler.dfa;
+        self.current_state_id = 0;
     }
 
     fn get_applicable_rules(&self, key: char) -> &[Rule] {
@@ -196,42 +270,47 @@ impl Engine {
 
     fn generate_transformations(
         &self,
-        composition: &mut Vec<Transformation>,
+        composition: &mut TransformationStack,
         key: char,
         is_upper_case: bool,
     ) {
         let lower_key = lower(key);
-        let mut transformations = crate::bamboo_util::generate_transformations(
-            composition,
+        let mut trans_buf = TransformationStack::new();
+
+        crate::bamboo_util::generate_transformations(
+            composition.as_slice(),
             self.get_applicable_rules(lower_key),
             self.config.to_flags(),
             lower_key,
             is_upper_case,
+            &mut trans_buf,
         );
 
-        if transformations.is_empty() {
-            transformations = crate::bamboo_util::generate_fallback_transformations(
+        if trans_buf.is_empty() {
+            crate::bamboo_util::generate_fallback_transformations(
                 self.get_applicable_rules(lower_key),
                 lower_key,
                 is_upper_case,
+                &mut trans_buf,
             );
-            let mut new_comp = composition.clone();
-            new_comp.extend(transformations.clone());
+
+            let mut tmp_comp = *composition;
+            tmp_comp.extend_from_slice(trans_buf.as_slice());
 
             if !self.input_method.super_keys.is_empty() {
                 let current_str = crate::flattener::flatten_slice(
-                    &new_comp,
+                    tmp_comp.as_slice(),
                     OutputOptions::TONE_LESS | OutputOptions::LOWER_CASE,
                 );
                 if uoh_tail_match(&current_str) {
                     let (target, rule) = crate::bamboo_util::find_target(
-                        &new_comp,
+                        tmp_comp.as_slice(),
                         self.get_applicable_rules(self.input_method.super_keys[0]),
                         self.config.to_flags(),
                     );
                     if let (Some(target), Some(mut rule)) = (target, rule) {
                         rule.key = '\0';
-                        transformations.push(Transformation {
+                        trans_buf.push(Transformation {
                             rule,
                             target: Some(target),
                             is_upper_case: false,
@@ -240,15 +319,17 @@ impl Engine {
                 }
             }
         }
-        composition.extend(transformations.iter().cloned());
+        composition.extend_from_slice(trans_buf.as_slice());
         if self.config.to_flags() & crate::bamboo_util::EFREE_TONE_MARKING != 0
-            && self.is_valid_internal(composition, false)
+            && self.is_valid_internal(composition.as_slice(), false)
         {
-            let extra = crate::bamboo_util::refresh_last_tone_target(
-                composition,
+            let mut extra = TransformationStack::new();
+            crate::bamboo_util::refresh_last_tone_target_into(
+                composition.as_mut_slice(),
                 self.config.to_flags() & crate::bamboo_util::ESTD_TONE_STYLE != 0,
+                &mut extra,
             );
-            composition.extend(extra);
+            composition.extend_from_slice(extra.as_slice());
         }
     }
 
@@ -277,19 +358,18 @@ impl Engine {
 
     fn new_composition_in_place(
         &self,
-        composition: &mut Vec<Transformation>,
-        scratch: &mut Vec<Transformation>,
+        composition: &mut TransformationStack,
+        scratch: &mut TransformationStack,
         key: char,
         is_upper_case: bool,
     ) {
-        let syllable_abs_start = Self::last_syllable_start(composition);
+        let syllable_abs_start = Self::last_syllable_start(composition.as_slice());
 
-        scratch.clear();
-        scratch.extend(composition.drain(syllable_abs_start..));
+        composition.drain_to(syllable_abs_start, scratch);
 
         let offset = syllable_abs_start;
         if offset != 0 {
-            for t in scratch.iter_mut() {
+            for t in scratch.as_mut_slice().iter_mut() {
                 if let Some(target) = t.target {
                     t.target = Some(target.saturating_sub(offset));
                 }
@@ -299,14 +379,14 @@ impl Engine {
         self.generate_transformations(scratch, key, is_upper_case);
 
         if offset != 0 {
-            for t in scratch.iter_mut() {
+            for t in scratch.as_mut_slice().iter_mut() {
                 if let Some(target) = t.target {
                     t.target = Some(target + offset);
                 }
             }
         }
 
-        composition.append(scratch);
+        composition.extend_from_slice(scratch.as_slice());
     }
 
     /// Processes a string of characters and returns the current active word.
@@ -408,30 +488,30 @@ impl Engine {
                 self.dfa.get_state(self.current_state_id).transitions[lower_key as usize];
             if next_state_id != 0 {
                 self.current_state_id = next_state_id;
-                let next_state = self.dfa.get_state(next_state_id);
-                self.active_len = next_state.composition.len().min(MAX_ACTIVE_TRANS);
-                self.active_buffer[..self.active_len].copy_from_slice(&next_state.composition);
+                let comp = self.dfa.get_composition(next_state_id);
+                self.active_len = comp.len().min(MAX_ACTIVE_TRANS);
+                self.active_buffer[..self.active_len].copy_from_slice(comp);
                 return;
             }
         }
 
-        let mut work = std::mem::take(&mut self.work_comp);
-        let mut scratch = std::mem::take(&mut self.scratch_comp);
+        let mut work = self.work_comp;
+        let mut scratch = self.scratch_comp;
 
         self.take_active_into(&mut work);
         self.new_composition_in_place(&mut work, &mut scratch, lower_key, is_upper_case);
 
         // Try to update DFA (Lazy JIT)
         if lower_key.is_ascii() && !is_upper_case && work.len() <= MAX_ACTIVE_TRANS {
-            let next_id = self.dfa.add_state(&work);
+            let next_id = self.dfa.add_state(work.as_slice());
             self.dfa.states[self.current_state_id as usize].transitions[lower_key as usize] =
                 next_id;
             self.current_state_id = next_id;
         } else {
-            self.current_state_id = self.dfa.find_state(&work).unwrap_or(0);
+            self.current_state_id = self.dfa.find_state(work.as_slice()).unwrap_or(0);
         }
 
-        self.set_active_from_vec(&mut work);
+        self.set_active_from_stack(&mut work);
 
         self.work_comp = work;
         self.scratch_comp = scratch;
@@ -501,90 +581,84 @@ impl Engine {
     ///
     /// If `to_vietnamese` is true, it attempts to re-apply Vietnamese transformations.
     pub fn restore_last_word(&mut self, to_vietnamese: bool) {
-        let mut work = std::mem::take(&mut self.work_comp);
-        let mut scratch = std::mem::take(&mut self.scratch_comp);
+        let mut work = self.work_comp;
+        let mut scratch = self.scratch_comp;
 
         self.take_active_into(&mut work);
         if work.is_empty() {
-            self.set_active_from_vec(&mut work);
-            self.work_comp = work;
-            self.scratch_comp = scratch;
+            self.set_active_from_stack(&mut work);
             self.current_state_id = 0;
             return;
         }
 
         let (prev_slice, last) =
-            crate::bamboo_util::extract_last_word(&work, Some(&self.input_method.keys));
-        let mut previous = prev_slice.to_vec();
+            crate::bamboo_util::extract_last_word(work.as_slice(), Some(&self.input_method.keys));
+
+        let mut previous = TransformationStack::new();
+        previous.extend_from_slice(prev_slice);
 
         if last.is_empty() {
-            self.set_active_from_vec(&mut work);
-            self.work_comp = work;
-            self.scratch_comp = scratch;
+            self.set_active_from_stack(&mut work);
             self.current_state_id = 0;
             return;
         }
         if !to_vietnamese {
-            previous.extend(crate::bamboo_util::break_composition_slice(last));
-            self.set_active_from_vec(&mut previous);
-            self.work_comp = work;
-            self.scratch_comp = scratch;
+            previous.extend_from_slice(&crate::bamboo_util::break_composition_slice(last));
+            self.set_active_from_stack(&mut previous);
             self.current_state_id = 0;
             return;
         }
 
-        let mut new_comp: Vec<Transformation> = Vec::new();
+        let mut new_comp = TransformationStack::new();
         for t in last {
             if t.rule.key == '\0' {
                 continue;
             }
             self.new_composition_in_place(&mut new_comp, &mut scratch, t.rule.key, t.is_upper_case);
         }
-        previous.extend(new_comp);
+        previous.extend_from_slice(new_comp.as_slice());
 
-        self.set_active_from_vec(&mut previous);
-        self.work_comp = work;
-        self.scratch_comp = scratch;
+        self.set_active_from_stack(&mut previous);
         self.current_state_id = 0;
     }
 
     /// Removes the last character from the active composition.
     pub fn remove_last_char(&mut self, refresh_last_tone_target: bool) {
-        let mut work = std::mem::take(&mut self.work_comp);
+        let mut work = self.work_comp;
 
         self.take_active_into(&mut work);
-        let last_appending_idx = crate::bamboo_util::find_last_appending_trans_idx(&work);
+        let last_appending_idx = crate::bamboo_util::find_last_appending_trans_idx(work.as_slice());
         let Some(last_idx) = last_appending_idx else {
-            self.set_active_from_vec(&mut work);
-            self.work_comp = work;
+            self.set_active_from_stack(&mut work);
             self.current_state_id = 0;
             return;
         };
 
-        let last_appending_key = work[last_idx].rule.key;
+        let last_appending_key = work.as_slice()[last_idx].rule.key;
         if !self.can_process_key_raw(last_appending_key) {
             work.pop();
-            self.set_active_from_vec(&mut work);
-            self.work_comp = work;
+            self.set_active_from_stack(&mut work);
             self.current_state_id = 0;
             return;
         }
 
         if work.is_empty() {
-            self.set_active_from_vec(&mut work);
-            self.work_comp = work;
+            self.set_active_from_stack(&mut work);
             self.current_state_id = 0;
             return;
         }
 
         let (prev_slice, last_comb_slice) =
-            crate::bamboo_util::extract_last_word(&work, Some(&self.input_method.keys));
-        let mut previous = prev_slice.to_vec();
-        let last_comb = last_comb_slice.to_vec();
+            crate::bamboo_util::extract_last_word(work.as_slice(), Some(&self.input_method.keys));
 
-        let mut new_comb: Vec<Transformation> = Vec::new();
+        let mut previous = TransformationStack::new();
+        previous.extend_from_slice(prev_slice);
+
+        let last_comb = last_comb_slice;
+
+        let mut new_comb_stack = TransformationStack::new();
         let prev_len = previous.len();
-        for (i, t) in last_comb.into_iter().enumerate() {
+        for (i, t) in last_comb.iter().enumerate() {
             let actual_idx = prev_len + i;
             if actual_idx == last_idx {
                 continue;
@@ -594,20 +668,21 @@ impl Engine {
             {
                 continue;
             }
-            new_comb.push(t);
+            new_comb_stack.push(*t);
         }
 
         if refresh_last_tone_target {
-            let extra = crate::bamboo_util::refresh_last_tone_target(
-                &mut new_comb,
+            let mut extra = TransformationStack::new();
+            crate::bamboo_util::refresh_last_tone_target_into(
+                new_comb_stack.as_mut_slice(),
                 self.config.to_flags() & crate::bamboo_util::ESTD_TONE_STYLE != 0,
+                &mut extra,
             );
-            new_comb.extend(extra);
+            new_comb_stack.extend_from_slice(extra.as_slice());
         }
 
-        previous.extend(new_comb);
-        self.set_active_from_vec(&mut previous);
-        self.work_comp = work;
+        previous.extend_from_slice(new_comb_stack.as_slice());
+        self.set_active_from_stack(&mut previous);
         self.current_state_id = 0;
     }
 

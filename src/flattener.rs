@@ -1,11 +1,9 @@
 //! Functions for converting a sequence of transformations into a final string.
 
-use crate::engine::Transformation;
+use crate::engine::{MAX_ACTIVE_TRANS, Transformation};
 use crate::input_method::{EffectType, Mark};
 use crate::mode::OutputOptions;
 use crate::utils::{add_mark_to_char, add_tone_to_char};
-
-const MAX_COMPOSITION: usize = 32;
 
 #[inline]
 fn lower(c: char) -> char {
@@ -54,14 +52,14 @@ fn write_canvas_slice(composition: &[Transformation], options: OutputOptions, ou
     }
 
     let len = composition.len();
-    debug_assert!(len <= MAX_COMPOSITION, "composition too long for stack canvas: {len}");
-    if len > MAX_COMPOSITION {
+    debug_assert!(len <= MAX_ACTIVE_TRANS, "composition too long for stack canvas: {len}");
+    if len > MAX_ACTIVE_TRANS {
         return;
     }
 
-    let mut next_effect: [Option<usize>; MAX_COMPOSITION] = [None; MAX_COMPOSITION];
-    let mut head_effect: [Option<usize>; MAX_COMPOSITION] = [None; MAX_COMPOSITION];
-    let mut appending_idxs = [0usize; MAX_COMPOSITION];
+    let mut next_effect: [Option<usize>; MAX_ACTIVE_TRANS] = [None; MAX_ACTIVE_TRANS];
+    let mut head_effect: [Option<usize>; MAX_ACTIVE_TRANS] = [None; MAX_ACTIVE_TRANS];
+    let mut appending_idxs = [0usize; MAX_ACTIVE_TRANS];
     let mut appending_len = 0usize;
 
     for (idx, trans) in composition.iter().enumerate() {

@@ -1,6 +1,6 @@
 //! Internal utility functions for Vietnamese syllable analysis and transformation generation.
 
-use crate::engine::Transformation;
+use crate::engine::{MAX_ACTIVE_TRANS, Transformation, TransformationStack};
 use crate::flattener::flatten_slice;
 use crate::input_method::{EffectType, Mark, Rule, Tone};
 use crate::mode::OutputOptions;
@@ -11,8 +11,6 @@ use crate::utils::{add_mark_to_char, add_tone_to_char, is_alpha, is_space, is_vo
 pub(crate) const EFREE_TONE_MARKING: u32 = 1 << 0;
 /// Flag to use the standard Vietnamese tone style (e.g., placing tone on the second vowel in some cases).
 pub(crate) const ESTD_TONE_STYLE: u32 = 1 << 1;
-
-const MAX_VALIDATION_COMPOSITION: usize = 32;
 
 #[inline]
 fn lower(c: char) -> char {
@@ -87,32 +85,6 @@ fn find_root_target(composition: &[Transformation], mut target: usize) -> usize 
     target
 }
 
-fn visible_char_lower_toneless(composition: &[Transformation], abs_idx: usize) -> char {
-    let appending = &composition[abs_idx];
-    let mut chr = appending.rule.effect_on;
-
-    for t in composition {
-        if t.target == Some(abs_idx) {
-            match t.rule.effect_type {
-                EffectType::MarkTransformation => {
-                    if t.rule.effect == Mark::Raw as u8 {
-                        chr = appending.rule.key;
-                    } else {
-                        chr = add_mark_to_char(chr, t.rule.effect);
-                    }
-                }
-                EffectType::ToneTransformation => {
-                    chr = add_tone_to_char(chr, t.rule.effect);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    chr = add_tone_to_char(chr, 0);
-    lower(chr)
-}
-
 /// Checks if the current composition represents a valid Vietnamese syllable.
 pub(crate) fn is_valid(composition: &[Transformation], input_is_full_complete: bool) -> bool {
     if composition.len() <= 1 {
@@ -131,8 +103,8 @@ pub(crate) fn is_valid(composition: &[Transformation], input_is_full_complete: b
     }
 
     // spell checking (fast path: no heap for engine's bounded composition)
-    if composition.len() <= MAX_VALIDATION_COMPOSITION {
-        let mut app_abs = [0usize; MAX_VALIDATION_COMPOSITION];
+    if composition.len() <= MAX_ACTIVE_TRANS {
+        let mut app_abs = [0usize; MAX_ACTIVE_TRANS];
         let mut app_len = 0usize;
 
         for (abs_idx, t) in composition.iter().enumerate() {
@@ -145,18 +117,44 @@ pub(crate) fn is_valid(composition: &[Transformation], input_is_full_complete: b
         let app_indices = &app_abs[..app_len];
         let (fc_idxs, vo_idxs, lc_idxs) = extract_cvc_appending_indices(composition, app_indices);
 
-        let mut fc_chars = ['\0'; MAX_VALIDATION_COMPOSITION];
-        let mut vo_chars = ['\0'; MAX_VALIDATION_COMPOSITION];
-        let mut lc_chars = ['\0'; MAX_VALIDATION_COMPOSITION];
+        let mut fc_chars = ['\0'; MAX_ACTIVE_TRANS];
+        let mut vo_chars = ['\0'; MAX_ACTIVE_TRANS];
+        let mut lc_chars = ['\0'; MAX_ACTIVE_TRANS];
+
+        // Resolve all characters in a single pass O(N)
+        let mut resolved = ['\0'; MAX_ACTIVE_TRANS];
+        for &abs_idx in app_indices.iter() {
+            resolved[abs_idx] = composition[abs_idx].rule.effect_on;
+        }
+
+        for t in composition {
+            if let Some(target) = t.target
+                && target < MAX_ACTIVE_TRANS
+            {
+                match t.rule.effect_type {
+                    EffectType::MarkTransformation => {
+                        if t.rule.effect == Mark::Raw as u8 {
+                            resolved[target] = composition[target].rule.key;
+                        } else {
+                            resolved[target] = add_mark_to_char(resolved[target], t.rule.effect);
+                        }
+                    }
+                    EffectType::ToneTransformation => {
+                        resolved[target] = add_tone_to_char(resolved[target], t.rule.effect);
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         for (i, &abs) in fc_idxs.iter().enumerate() {
-            fc_chars[i] = visible_char_lower_toneless(composition, abs);
+            fc_chars[i] = lower(add_tone_to_char(resolved[abs], 0));
         }
         for (i, &abs) in vo_idxs.iter().enumerate() {
-            vo_chars[i] = visible_char_lower_toneless(composition, abs);
+            vo_chars[i] = lower(add_tone_to_char(resolved[abs], 0));
         }
         for (i, &abs) in lc_idxs.iter().enumerate() {
-            lc_chars[i] = visible_char_lower_toneless(composition, abs);
+            lc_chars[i] = lower(add_tone_to_char(resolved[abs], 0));
         }
 
         return is_valid_cvc_chars(
@@ -336,7 +334,7 @@ fn extract_cvc_appending_indices<'a>(
     _composition: &[Transformation],
     app_indices: &'a [usize],
 ) -> (&'a [usize], &'a [usize], &'a [usize]) {
-    let mut results = ['\0'; MAX_VALIDATION_COMPOSITION];
+    let mut results = ['\0'; MAX_ACTIVE_TRANS];
     for (i, &idx) in app_indices.iter().enumerate() {
         results[i] = _composition[idx].rule.result;
     }
@@ -384,10 +382,10 @@ fn extract_cvc_appending_indices<'a>(
 }
 
 fn extract_cvc_trans(composition: &[Transformation]) -> Cvc {
-    let mut app_indices = [0usize; MAX_VALIDATION_COMPOSITION];
+    let mut app_indices = [0usize; MAX_ACTIVE_TRANS];
     let mut app_len = 0usize;
     for (i, t) in composition.iter().enumerate() {
-        if t.target.is_none() && app_len < MAX_VALIDATION_COMPOSITION {
+        if t.target.is_none() && app_len < MAX_ACTIVE_TRANS {
             app_indices[app_len] = i;
             app_len += 1;
         }
@@ -489,25 +487,18 @@ pub(crate) fn extract_last_word<'a>(
 }
 
 fn is_effective(composition: &[Transformation], target_idx: usize, new_rule: &Rule) -> bool {
-    // A rule is effective if it changes the visual character OR it's a new type of transformation on that target.
-    // For bamboo-core, typically we want to avoid duplicate identical transformations.
-
     for t in composition {
         if t.target == Some(target_idx) && t.rule.effect_type == new_rule.effect_type {
-            // If the exact same effect is already there, it's NOT effective (redundant).
             if t.rule.effect == new_rule.effect {
                 return false;
             }
-            // If it's a different effect of same type (e.g., changing tone from acute to grave), it IS effective.
             return true;
         }
     }
 
-    // If no transformation of this type exists, it's effective if it actually changes the character.
     let appending_idx = find_root_target(composition, target_idx);
     let appending = &composition[appending_idx];
 
-    // Calculate current character at target_idx
     let mut current_char = appending.rule.effect_on;
     for t in composition {
         if t.target == Some(appending_idx) {
@@ -527,7 +518,6 @@ fn is_effective(composition: &[Transformation], target_idx: usize, new_rule: &Ru
         }
     }
 
-    // Calculate character after applying new_rule
     let mut next_char = current_char;
     match new_rule.effect_type {
         EffectType::MarkTransformation => {
@@ -562,7 +552,7 @@ fn find_mark_target(
                     continue;
                 }
 
-                let mut tmp = [Transformation::default(); MAX_VALIDATION_COMPOSITION];
+                let mut tmp = [Transformation::default(); MAX_ACTIVE_TRANS];
                 let mut tmp_len = composition.len();
                 tmp[..tmp_len].copy_from_slice(composition);
                 tmp[tmp_len] =
@@ -632,9 +622,8 @@ fn generate_undo_transformations(
     composition: &[Transformation],
     rules: &[Rule],
     flags: u32,
-) -> Vec<Transformation> {
-    let mut transformations: Vec<Transformation> = Vec::new();
-
+    out: &mut TransformationStack,
+) {
     for rule in rules {
         if rule.effect_type == EffectType::ToneTransformation {
             let mut target: Option<usize> = None;
@@ -666,7 +655,7 @@ fn generate_undo_transformations(
             };
 
             if is_effective(composition, target, &undo_rule) {
-                transformations.push(Transformation {
+                out.push(Transformation {
                     target: Some(target),
                     is_upper_case: false,
                     rule: undo_rule,
@@ -688,7 +677,7 @@ fn generate_undo_transformations(
                     };
 
                     if is_effective(composition, target, &undo_rule) {
-                        transformations.push(Transformation {
+                        out.push(Transformation {
                             target: Some(target),
                             is_upper_case: false,
                             rule: undo_rule,
@@ -698,8 +687,6 @@ fn generate_undo_transformations(
             }
         }
     }
-
-    transformations
 }
 
 fn contains_uho(s: &str) -> bool {
@@ -713,16 +700,15 @@ pub(crate) fn generate_transformations(
     flags: u32,
     lower_key: char,
     is_upper_case: bool,
-) -> Vec<Transformation> {
-    let mut transformations: Vec<Transformation> = Vec::new();
-
+    out: &mut TransformationStack,
+) {
     if let Some(last) = composition.last() {
         let rule = &last.rule;
         if rule.effect_type == EffectType::Appending
             && rule.key == lower_key
             && rule.key != rule.result
         {
-            transformations.push(Transformation {
+            out.push(Transformation {
                 rule: Rule {
                     effect_type: EffectType::MarkTransformation,
                     effect: Mark::Raw as u8,
@@ -735,42 +721,38 @@ pub(crate) fn generate_transformations(
                 target: Some(composition.len() - 1),
                 is_upper_case: false,
             });
-            return transformations;
+            return;
         }
     }
 
     if let (Some(target), Some(applicable_rule)) = find_target(composition, applicable_rules, flags)
     {
-        transformations.push(Transformation {
-            rule: applicable_rule,
-            target: Some(target),
-            is_upper_case,
-        });
+        out.push(Transformation { rule: applicable_rule, target: Some(target), is_upper_case });
 
         if applicable_rule.effect_type != EffectType::MarkTransformation {
-            return transformations;
+            return;
         }
 
-        let mut new_comp = [Transformation::default(); MAX_VALIDATION_COMPOSITION];
+        let mut new_comp = [Transformation::default(); MAX_ACTIVE_TRANS];
         let mut new_len = composition.len();
         new_comp[..new_len].copy_from_slice(composition);
-        new_comp[new_len] = transformations[0];
+        new_comp[new_len] = out.as_slice()[0];
         new_len += 1;
 
         if is_valid(&new_comp[..new_len], true) {
-            return transformations;
+            return;
         }
 
         if let (Some(target2), Some(mut virtual_rule)) =
             find_target(&new_comp[..new_len], applicable_rules, flags)
         {
             virtual_rule.key = '\0';
-            transformations.push(Transformation {
+            out.push(Transformation {
                 rule: virtual_rule,
                 target: Some(target2),
                 is_upper_case: false,
             });
-            return transformations;
+            return;
         }
     } else {
         let flat = flatten_slice(
@@ -805,7 +787,7 @@ pub(crate) fn generate_transformations(
                     },
                 };
 
-                let mut tmp = [Transformation::default(); MAX_VALIDATION_COMPOSITION];
+                let mut tmp = [Transformation::default(); MAX_ACTIVE_TRANS];
                 let mut tmp_len = composition.len();
                 tmp[..tmp_len].copy_from_slice(composition);
                 tmp[tmp_len] = trans;
@@ -815,25 +797,22 @@ pub(crate) fn generate_transformations(
                     find_target(&tmp[..tmp_len], applicable_rules, flags)
                     && target_idx != Some(target)
                 {
-                    transformations.push(trans);
-                    transformations.push(Transformation {
+                    out.push(trans);
+                    out.push(Transformation {
                         rule: applicable_rule,
                         target: Some(target),
                         is_upper_case,
                     });
-                    return transformations;
+                    return;
                 }
             }
         }
 
-        let undo = generate_undo_transformations(composition, applicable_rules, flags);
-        if !undo.is_empty() {
-            transformations.extend(undo);
-            transformations.push(new_appending_trans(lower_key, is_upper_case));
+        generate_undo_transformations(composition, applicable_rules, flags, out);
+        if !out.is_empty() {
+            out.push(new_appending_trans(lower_key, is_upper_case));
         }
     }
-
-    transformations
 }
 
 /// Generates fallback transformations when no specific rules match.
@@ -841,11 +820,10 @@ pub(crate) fn generate_fallback_transformations(
     applicable_rules: &[Rule],
     lower_key: char,
     is_upper_case: bool,
-) -> Vec<Transformation> {
-    let mut transformations: Vec<Transformation> = Vec::new();
-
+    out: &mut TransformationStack,
+) {
     let trans = generate_appending_trans(applicable_rules, lower_key, is_upper_case);
-    transformations.push(trans);
+    out.push(trans);
 
     for i in 0..trans.rule.appended_len {
         let appended_char = trans.rule.appended[i as usize];
@@ -859,37 +837,42 @@ pub(crate) fn generate_fallback_transformations(
             appended: ['\0'; 2],
             appended_len: 0,
         };
-        transformations.push(Transformation {
+        out.push(Transformation {
             rule: appended_rule,
             target: None,
             is_upper_case: _is_upper_case,
         });
     }
-
-    transformations
 }
 
 /// "Breaks" a composition by converting all non-virtual transformations into simple appending ones.
-pub(crate) fn break_composition_slice(composition: &[Transformation]) -> Vec<Transformation> {
-    let mut result: Vec<Transformation> = Vec::with_capacity(composition.len());
+pub(crate) fn break_composition_slice(
+    composition: &[Transformation],
+) -> [Transformation; MAX_ACTIVE_TRANS] {
+    let mut result = [Transformation::default(); MAX_ACTIVE_TRANS];
+    let mut len = 0;
     for trans in composition {
         if trans.rule.key == '\0' {
             continue;
         }
-        result.push(new_appending_trans(trans.rule.key, trans.is_upper_case));
+        if len < MAX_ACTIVE_TRANS {
+            result[len] = new_appending_trans(trans.rule.key, trans.is_upper_case);
+            len += 1;
+        }
     }
     result
 }
 
 /// Updates the tone target in the composition based on the current syllable structure and tone style.
-pub(crate) fn refresh_last_tone_target(
+pub(crate) fn refresh_last_tone_target_into(
     composition: &mut [Transformation],
     std_style: bool,
-) -> Vec<Transformation> {
+    out: &mut TransformationStack,
+) {
     let (new_tone_target, last_tone_idx) = {
         let cvc = extract_cvc_trans(composition);
         if cvc.vo_len == 0 || get_last_tone_transformation(composition).is_none() {
-            return Vec::new();
+            return;
         }
 
         let new_tone_target = find_tone_target(composition, std_style);
@@ -905,19 +888,17 @@ pub(crate) fn refresh_last_tone_target(
         (new_tone_target, last_tone_idx)
     };
 
-    let Some(idx) = last_tone_idx else { return Vec::new() };
+    let Some(idx) = last_tone_idx else { return };
 
     let last_target = composition[idx].target;
     if last_target == new_tone_target {
-        return Vec::new();
+        return;
     }
 
     composition[idx].target = new_tone_target;
 
-    let mut transformations: Vec<Transformation> = Vec::new();
-
     if let Some(t) = last_target {
-        transformations.push(Transformation {
+        out.push(Transformation {
             target: Some(t),
             is_upper_case: false,
             rule: Rule {
@@ -935,12 +916,10 @@ pub(crate) fn refresh_last_tone_target(
     if let Some(new_tone_target) = new_tone_target {
         let mut override_rule = composition[idx].rule;
         override_rule.key = '\0';
-        transformations.push(Transformation {
+        out.push(Transformation {
             target: Some(new_tone_target),
             is_upper_case: false,
             rule: override_rule,
         });
     }
-
-    transformations
 }
