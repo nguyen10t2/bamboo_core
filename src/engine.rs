@@ -541,11 +541,13 @@ impl Engine {
     }
 
     fn push_active(&mut self, trans: Transformation) {
-        if self.active_len < MAX_ACTIVE_TRANS {
-            self.active_buffer[self.active_len] = trans;
-            self.active_len += 1;
-            self.current_state_id = self.dfa.find_state(self.active_slice()).unwrap_or(0);
+        if self.active_len >= MAX_ACTIVE_TRANS {
+            // Buffer full, auto-commit to make room
+            self.commit();
         }
+        self.active_buffer[self.active_len] = trans;
+        self.active_len += 1;
+        self.current_state_id = self.dfa.find_state(self.active_slice()).unwrap_or(0);
     }
 
     /// Clears the active syllable buffer and appends it to the committed text.
@@ -605,7 +607,6 @@ impl Engine {
     /// If `to_vietnamese` is true, it attempts to re-apply Vietnamese transformations.
     pub fn restore_last_word(&mut self, to_vietnamese: bool) {
         let mut work = self.work_comp;
-        let mut scratch = self.scratch_comp;
 
         self.take_active_into(&mut work);
         if work.is_empty() {
@@ -633,12 +634,16 @@ impl Engine {
         }
 
         let mut new_comp = TransformationStack::new();
+        let mut temp_engine = Self::with_config(self.input_method.clone(), self.config);
+
         for t in last {
             if t.rule.key == '\0' {
                 continue;
             }
-            self.new_composition_in_place(&mut new_comp, &mut scratch, t.rule.key, t.is_upper_case);
+            temp_engine.process_key(t.rule.key, Mode::Vietnamese);
         }
+        new_comp.extend_from_slice(temp_engine.active_slice());
+
         previous.extend_from_slice(new_comp.as_slice());
 
         self.set_active_from_stack(&mut previous);
@@ -648,7 +653,6 @@ impl Engine {
     /// Removes the last character from the active composition.
     pub fn remove_last_char(&mut self, refresh_last_tone_target: bool) {
         let mut work = self.work_comp;
-        let mut scratch = self.scratch_comp;
 
         self.take_active_into(&mut work);
 
@@ -677,21 +681,19 @@ impl Engine {
         let idx_in_last = idx as isize - prev_slice.len() as isize;
 
         let mut new_word_comp = TransformationStack::new();
+        let mut temp_engine = Self::with_config(self.input_method.clone(), self.config);
+
         for (i, t) in last_comb.iter().enumerate() {
             if i as isize == idx_in_last {
-                continue; // Skip the physical key being deleted
+                continue;
             }
             if t.rule.key == '\0' {
-                continue; // Skip virtual ones
+                continue;
             }
-            // Re-type the key
-            self.new_composition_in_place(
-                &mut new_word_comp,
-                &mut scratch,
-                t.rule.key,
-                t.is_upper_case,
-            );
+            temp_engine.process_key(t.rule.key, Mode::Vietnamese);
         }
+
+        new_word_comp.extend_from_slice(temp_engine.active_slice());
 
         if refresh_last_tone_target {
             let mut extra = TransformationStack::new();

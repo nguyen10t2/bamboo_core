@@ -711,7 +711,6 @@ pub(crate) fn generate_transformations(
                 target: Some(composition.len() - 1),
                 is_upper_case: false,
             });
-            return;
         }
     }
 
@@ -730,10 +729,7 @@ pub(crate) fn generate_transformations(
         new_len += 1;
 
         if is_valid(&new_comp[..new_len], true) {
-            return;
-        }
-
-        if let (Some(target2), Some(mut virtual_rule)) =
+        } else if let (Some(target2), Some(mut virtual_rule)) =
             find_target(&new_comp[..new_len], applicable_rules, flags)
         {
             virtual_rule.key = '\0';
@@ -742,7 +738,6 @@ pub(crate) fn generate_transformations(
                 target: Some(target2),
                 is_upper_case: false,
             });
-            return;
         }
     } else {
         let flat = flatten_slice(
