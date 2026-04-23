@@ -5,25 +5,25 @@ use crate::utils::{add_mark_to_toneless_char, add_tone_to_char, is_vowel};
 
 /// Represents a Vietnamese tone mark.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tone {
-    /// No tone (Ngang).
+    /// No tone.
     None = 0,
-    /// Grave accent (Huyền).
+    /// Grave accent.
     Grave = 1,
-    /// Acute accent (Sắc).
+    /// Acute accent.
     Acute = 2,
-    /// Hook above (Hỏi).
+    /// Hook above.
     Hook = 3,
-    /// Tilde (Ngã).
+    /// Tilde.
     Tilde = 4,
-    /// Dot below (Nặng).
+    /// Dot below.
     Dot = 5,
 }
 
 /// Represents a Vietnamese diacritic mark (marks that change the vowel/consonant).
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Mark {
     /// No diacritic.
     None = 0,
@@ -41,14 +41,14 @@ pub enum Mark {
 
 /// The type of transformation a rule applies.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum EffectType {
     /// Appends a character (standard typing).
     #[default]
     Appending = 0,
-    /// Adds/changes a diacritic mark (e.g., a -> ă).
+    /// Adds/changes a diacritic mark.
     MarkTransformation = 1,
-    /// Adds/changes a tone mark (e.g., a -> á).
+    /// Adds/changes a tone mark.
     ToneTransformation = 2,
     /// Replaces a character with another.
     Replacing = 3,
@@ -64,7 +64,7 @@ static TONES: Map<&'static str, Tone> = phf_map! {
 };
 
 /// A transformation rule that defines how a key press affects the composition.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Rule {
     /// The key that triggers this rule.
     pub key: char,

@@ -72,6 +72,7 @@
 mod bamboo_util;
 mod charset_def;
 mod config;
+mod dfa;
 mod encoder;
 mod engine;
 mod flattener;
@@ -99,6 +100,7 @@ pub mod advanced {
     pub use crate::mode::OutputOptions;
 
     pub use crate::charset_def::{get_charset_definition, get_charset_definitions};
+    pub use crate::dfa::{Dfa, State};
     pub use crate::encoder::{encode, get_charset_name, get_charset_names};
     pub use crate::input_method_def::{get_input_method, get_input_method_definitions};
 }

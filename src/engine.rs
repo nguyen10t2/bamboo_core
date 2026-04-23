@@ -7,7 +7,7 @@ use crate::mode::{Mode, OutputOptions};
 const MAX_ACTIVE_TRANS: usize = 32;
 
 /// Represents a single keypress or a transformation derived from it (e.g., adding a mark or tone).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
 pub struct Transformation {
     /// The rule that was applied.
     pub rule: Rule,
@@ -63,6 +63,9 @@ pub struct Engine {
 
     prev_preedit: String,
     delta_buf: String,
+
+    dfa: crate::dfa::Dfa,
+    current_state_id: u32,
 }
 
 impl Engine {
@@ -125,11 +128,13 @@ impl Engine {
 
             prev_preedit: String::with_capacity(64),
             delta_buf: String::with_capacity(64),
+            dfa: crate::dfa::Dfa::new(),
+            current_state_id: 0,
         }
     }
 
     #[inline]
-    fn active_slice(&self) -> &[Transformation] {
+    pub(crate) fn active_slice(&self) -> &[Transformation] {
         &self.active_buffer[..self.active_len]
     }
 
@@ -393,7 +398,21 @@ impl Engine {
             if crate::utils::is_word_break_symbol(lower_key) {
                 self.commit();
             }
+            self.current_state_id = 0;
             return;
+        }
+
+        // DFA Fast Path
+        if lower_key.is_ascii() && !is_upper_case {
+            let next_state_id =
+                self.dfa.get_state(self.current_state_id).transitions[lower_key as usize];
+            if next_state_id != 0 {
+                self.current_state_id = next_state_id;
+                let next_state = self.dfa.get_state(next_state_id);
+                self.active_len = next_state.composition.len().min(MAX_ACTIVE_TRANS);
+                self.active_buffer[..self.active_len].copy_from_slice(&next_state.composition);
+                return;
+            }
         }
 
         let mut work = std::mem::take(&mut self.work_comp);
@@ -401,6 +420,17 @@ impl Engine {
 
         self.take_active_into(&mut work);
         self.new_composition_in_place(&mut work, &mut scratch, lower_key, is_upper_case);
+
+        // Try to update DFA (Lazy JIT)
+        if lower_key.is_ascii() && !is_upper_case && work.len() <= MAX_ACTIVE_TRANS {
+            let next_id = self.dfa.add_state(&work);
+            self.dfa.states[self.current_state_id as usize].transitions[lower_key as usize] =
+                next_id;
+            self.current_state_id = next_id;
+        } else {
+            self.current_state_id = self.dfa.find_state(&work).unwrap_or(0);
+        }
+
         self.set_active_from_vec(&mut work);
 
         self.work_comp = work;
@@ -411,6 +441,7 @@ impl Engine {
         if self.active_len < MAX_ACTIVE_TRANS {
             self.active_buffer[self.active_len] = trans;
             self.active_len += 1;
+            self.current_state_id = self.dfa.find_state(self.active_slice()).unwrap_or(0);
         }
     }
 
@@ -422,6 +453,7 @@ impl Engine {
         let word = self.output();
         self.committed_text.push_str(&word);
         self.active_len = 0;
+        self.current_state_id = 0;
     }
 
     /// Returns the currently active syllable as a string.
@@ -477,6 +509,7 @@ impl Engine {
             self.set_active_from_vec(&mut work);
             self.work_comp = work;
             self.scratch_comp = scratch;
+            self.current_state_id = 0;
             return;
         }
 
@@ -488,6 +521,7 @@ impl Engine {
             self.set_active_from_vec(&mut work);
             self.work_comp = work;
             self.scratch_comp = scratch;
+            self.current_state_id = 0;
             return;
         }
         if !to_vietnamese {
@@ -495,6 +529,7 @@ impl Engine {
             self.set_active_from_vec(&mut previous);
             self.work_comp = work;
             self.scratch_comp = scratch;
+            self.current_state_id = 0;
             return;
         }
 
@@ -510,6 +545,7 @@ impl Engine {
         self.set_active_from_vec(&mut previous);
         self.work_comp = work;
         self.scratch_comp = scratch;
+        self.current_state_id = 0;
     }
 
     /// Removes the last character from the active composition.
@@ -521,6 +557,7 @@ impl Engine {
         let Some(last_idx) = last_appending_idx else {
             self.set_active_from_vec(&mut work);
             self.work_comp = work;
+            self.current_state_id = 0;
             return;
         };
 
@@ -529,12 +566,14 @@ impl Engine {
             work.pop();
             self.set_active_from_vec(&mut work);
             self.work_comp = work;
+            self.current_state_id = 0;
             return;
         }
 
         if work.is_empty() {
             self.set_active_from_vec(&mut work);
             self.work_comp = work;
+            self.current_state_id = 0;
             return;
         }
 
@@ -569,6 +608,7 @@ impl Engine {
         previous.extend(new_comb);
         self.set_active_from_vec(&mut previous);
         self.work_comp = work;
+        self.current_state_id = 0;
     }
 
     /// Resets the engine state, clearing committed and active text.
@@ -577,6 +617,7 @@ impl Engine {
         self.active_len = 0;
         self.prev_preedit.clear();
         self.delta_buf.clear();
+        self.current_state_id = 0;
     }
 }
 
