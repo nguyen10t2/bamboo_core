@@ -78,6 +78,7 @@ impl Dfa {
 }
 
 /// A DFA compiler that supports pre-initializing common states.
+#[allow(dead_code)]
 pub struct DfaCompiler<'a> {
     pub input_method: &'a InputMethod,
     pub flags: u32,
@@ -85,6 +86,7 @@ pub struct DfaCompiler<'a> {
     pub dfa: Dfa,
 }
 
+#[allow(dead_code)]
 impl<'a> DfaCompiler<'a> {
     pub fn new(im: &'a InputMethod, flags: u32) -> Self {
         let mut compiler =
