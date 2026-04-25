@@ -6,7 +6,7 @@
 
 A high-performance Vietnamese input method engine (IME) core written in Rust, inherited and optimized from the original [bamboo-core](https://github.com/BambooEngine/bamboo-core) in Go.
 
-## 🚀 Version 0.3.3: High-Performance Snapshot
+## 🚀 Version 0.3.5: High-Performance Snapshot
 
 This version marks a significant milestone in efficiency and stability, achieving a **Zero-Allocation Hot Path** while maintaining absolute linguistic correctness.
 
