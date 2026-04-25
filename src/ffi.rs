@@ -32,7 +32,10 @@ where
 /// Initializes the global engine with the default Telex input method.
 #[unsafe(no_mangle)]
 pub extern "C" fn bamboo_setup() {
-    let mut guard = GLOBAL_ENGINE.lock().unwrap();
+    let mut guard = match GLOBAL_ENGINE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     *guard = Some(Engine::new(InputMethod::telex()));
 }
 
@@ -64,7 +67,10 @@ pub extern "C" fn bamboo_set_input_method(method: i32) {
         5 => InputMethod::telex_w(),
         _ => return,
     };
-    let mut guard = GLOBAL_ENGINE.lock().unwrap();
+    let mut guard = match GLOBAL_ENGINE.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     *guard = Some(Engine::new(im));
 }
 
@@ -87,7 +93,8 @@ pub extern "C" fn bamboo_process_key(key: u32, is_vietnamese: i32) -> *mut c_cha
             e.process_key(c, mode);
         }
         let out = e.output();
-        CString::new(out).unwrap().into_raw()
+        // Engine output is valid UTF-8 without null bytes; fallback to empty string if somehow invalid.
+        CString::new(out).unwrap_or_default().into_raw()
     })
 }
 
@@ -165,7 +172,7 @@ pub unsafe extern "C" fn bamboo_process_key_buf(
 pub extern "C" fn bamboo_output() -> *mut c_char {
     with_engine(|e| {
         let out = e.output();
-        CString::new(out).unwrap().into_raw()
+        CString::new(out).unwrap_or_default().into_raw()
     })
 }
 
@@ -243,7 +250,7 @@ pub unsafe extern "C" fn bamboo_engine_process(engine: *mut BambooEngine, key: u
         e.process_key(c, Mode::Vietnamese);
     }
     let out = e.output();
-    CString::new(out).unwrap().into_raw()
+    CString::new(out).unwrap_or_default().into_raw()
 }
 
 /// Instance-based variant of [`bamboo_process_key_buf`].

@@ -92,6 +92,24 @@ static ASCII_PROPS: [u8; 128] = {
     props
 };
 
+/// Converts a character to lowercase, fast-path for ASCII.
+#[inline]
+pub fn lower(c: char) -> char {
+    if c.is_ascii() { c.to_ascii_lowercase() } else { c.to_lowercase().next().unwrap_or(c) }
+}
+
+/// Converts a character to uppercase, fast-path for ASCII.
+#[inline]
+pub fn upper(c: char) -> char {
+    if c.is_ascii() { c.to_ascii_uppercase() } else { c.to_uppercase().next().unwrap_or(c) }
+}
+
+/// Returns true if the character is uppercase.
+#[inline]
+pub fn is_upper(c: char) -> bool {
+    if c.is_ascii() { c.is_ascii_uppercase() } else { lower(c) != c }
+}
+
 /// Returns true if the character is a space.
 #[inline]
 pub fn is_space(c: char) -> bool {

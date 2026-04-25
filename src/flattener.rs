@@ -3,17 +3,7 @@
 use crate::engine::{MAX_ACTIVE_TRANS, Transformation};
 use crate::input_method::{EffectType, Mark};
 use crate::mode::OutputOptions;
-use crate::utils::{add_mark_to_char, add_tone_to_char};
-
-#[inline]
-fn lower(c: char) -> char {
-    if c.is_ascii() { c.to_ascii_lowercase() } else { c.to_lowercase().next().unwrap_or(c) }
-}
-
-#[inline]
-fn upper(c: char) -> char {
-    if c.is_ascii() { c.to_ascii_uppercase() } else { c.to_uppercase().next().unwrap_or(c) }
-}
+use crate::utils::{add_mark_to_char, add_tone_to_char, lower, upper};
 
 /// Converts a slice of transformations into a string based on the provided options.
 pub(crate) fn flatten_slice(composition: &[Transformation], options: OutputOptions) -> String {
@@ -66,8 +56,10 @@ fn write_canvas_slice(composition: &[Transformation], options: OutputOptions, ou
         if (options.contains(OutputOptions::RAW) || trans.rule.effect_type == EffectType::Appending)
             && trans.rule.key != '\0'
         {
-            appending_idxs[appending_len] = idx;
-            appending_len += 1;
+            if appending_len < MAX_ACTIVE_TRANS {
+                appending_idxs[appending_len] = idx;
+                appending_len += 1;
+            }
         } else if let Some(target) = trans.target
             && target < len
         {
@@ -86,14 +78,21 @@ fn write_canvas_slice(composition: &[Transformation], options: OutputOptions, ou
             chr = appending_trans.rule.effect_on;
 
             let mut curr = head_effect[abs_idx];
-            let mut effects = [None; 8];
+            let mut effects = [None; MAX_ACTIVE_TRANS];
             let mut count = 0;
             while let Some(idx) = curr {
-                if count < 8 {
-                    effects[count] = Some(idx);
-                    count += 1;
+                if count >= MAX_ACTIVE_TRANS {
+                    debug_assert!(
+                        false,
+                        "flattener: effect chain exceeded MAX_ACTIVE_TRANS — possible cycle"
+                    );
+                    break;
                 }
-                curr = next_effect[idx];
+                effects[count] = Some(idx);
+                count += 1;
+                // next_effect[idx] is always < len (built in the loop above with `target < len` guard),
+                // so this access is safe as long as the array has MAX_ACTIVE_TRANS entries.
+                curr = if idx < MAX_ACTIVE_TRANS { next_effect[idx] } else { None };
             }
 
             for i in (0..count).rev() {

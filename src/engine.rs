@@ -3,6 +3,7 @@
 use crate::config::Config;
 use crate::input_method::{InputMethod, Rule};
 use crate::mode::{Mode, OutputOptions};
+use crate::utils::{is_upper, lower};
 
 /// Maximum number of active transformations in a single syllable.
 pub const MAX_ACTIVE_TRANS: usize = 16;
@@ -37,6 +38,10 @@ impl TransformationStack {
     /// Pushes a new transformation onto the stack.
     /// Does nothing if the stack is full.
     pub fn push(&mut self, t: Transformation) {
+        debug_assert!(
+            self.len < MAX_ACTIVE_TRANS,
+            "TransformationStack overflow: max {MAX_ACTIVE_TRANS} reached"
+        );
         if self.len < MAX_ACTIVE_TRANS {
             self.data[self.len] = t;
             self.len += 1;
@@ -99,15 +104,6 @@ impl TransformationStack {
 }
 
 #[inline]
-fn lower(c: char) -> char {
-    if c.is_ascii() { c.to_ascii_lowercase() } else { c.to_lowercase().next().unwrap_or(c) }
-}
-
-#[inline]
-fn is_upper(c: char) -> bool {
-    if c.is_ascii() { c.is_ascii_uppercase() } else { lower(c) != c }
-}
-
 fn uoh_tail_match(s: &str) -> bool {
     for pat in ["uơ", "ưo"] {
         if let Some(idx) = s.find(pat) {
@@ -247,7 +243,17 @@ impl Engine {
     }
 
     /// Warms up the DFA by pre-compiling common Vietnamese syllables.
-    /// This reduces latency for the first time these syllables are typed.
+    ///
+    /// This API is intentionally unstable and currently uses a Telex-biased
+    /// heuristic corpus. It can help long-lived Telex sessions, but may hurt
+    /// cold-start latency or non-Telex/custom input methods.
+    ///
+    /// Prefer relying on the default lazy JIT behavior unless you have benchmark
+    /// data for your production workload.
+    #[deprecated(
+        since = "0.3.4",
+        note = "Engine::warm_up() is unstable and may be removed. It uses a Telex-biased heuristic and may regress cold-start or non-Telex workloads."
+    )]
     pub fn warm_up(&mut self) {
         let mut compiler = crate::dfa::DfaCompiler::new(&self.input_method, self.config.to_flags());
         compiler.compile_common();
@@ -455,13 +461,13 @@ impl Engine {
         let active = &self.active_buffer[..active_len];
         crate::flattener::flatten_slice_into(active, OutputOptions::NONE, &mut self.delta_buf);
 
-        let (lcp_chars, lcp_bytes) = Self::lcp_chars_and_bytes(&self.prev_preedit, &self.delta_buf);
-
-        let prev_chars = self.prev_preedit.chars().count();
+        let (_lcp_chars, lcp_bytes) =
+            Self::lcp_chars_and_bytes(&self.prev_preedit, &self.delta_buf);
 
         let prev_bytes = self.prev_preedit.len();
 
-        let backspaces_chars = prev_chars.saturating_sub(lcp_chars);
+        // Count only the suffix chars after the common prefix — O(suffix_len) instead of O(total).
+        let backspaces_chars = self.prev_preedit[lcp_bytes..].chars().count();
         let backspaces_bytes = prev_bytes.saturating_sub(lcp_bytes);
 
         std::mem::swap(&mut self.prev_preedit, &mut self.delta_buf);

@@ -5,25 +5,33 @@ use crate::flattener::flatten_slice;
 use crate::input_method::{EffectType, Mark, Rule, Tone};
 use crate::mode::OutputOptions;
 use crate::spelling::{is_valid_cvc, is_valid_cvc_chars};
-use crate::utils::{add_mark_to_char, add_tone_to_char, is_alpha, is_space, is_vowel};
+use crate::utils::{
+    add_mark_to_char, add_tone_to_char, is_alpha, is_space, is_upper, is_vowel, lower,
+};
 
 /// Flag to enable free tone marking (allows placing tones at any time).
 pub(crate) const EFREE_TONE_MARKING: u32 = 1 << 0;
 /// Flag to use the standard Vietnamese tone style (e.g., placing tone on the second vowel in some cases).
 pub(crate) const ESTD_TONE_STYLE: u32 = 1 << 1;
 
-#[inline]
-fn lower(c: char) -> char {
-    if c.is_ascii() { c.to_ascii_lowercase() } else { c.to_lowercase().next().unwrap_or(c) }
-}
-
-#[inline]
-fn is_upper(c: char) -> bool {
-    if c.is_ascii() { c.is_ascii_uppercase() } else { lower(c) != c }
-}
-
 fn in_key_list(keys: Option<&[char]>, key: char) -> bool {
     keys.map(|ks| ks.contains(&key)).unwrap_or(false)
+}
+
+/// Extracts the raw (toneless, markless, lowercase) key chars from appending transformations.
+/// Returns the number of chars written into `out`.
+fn raw_keys_of(trans_slice: &[Transformation], out: &mut [char; 4]) -> usize {
+    let mut len = 0;
+    for t in trans_slice {
+        if t.rule.key != '\0' && len < 4 {
+            out[len] = lower(crate::utils::add_tone_to_char(
+                crate::utils::add_mark_to_toneless_char(t.rule.key, 0),
+                0,
+            ));
+            len += 1;
+        }
+    }
+    len
 }
 
 /// Finds the last transformation in the composition that resulted in an appended character.
@@ -57,11 +65,11 @@ pub(crate) fn generate_appending_trans(
     for rule in rules {
         if rule.key == lower_key && rule.effect_type == EffectType::Appending {
             let mut rule = *rule;
-            let mut _is_upper_case = is_upper_case || is_upper(rule.effect_on);
+            // Capture uppercase flag from the original effect_on *before* lowercasing it.
+            let effective_upper = is_upper_case || is_upper(rule.effect_on);
             rule.effect_on = lower(rule.effect_on);
             rule.result = rule.effect_on;
-            _is_upper_case |= is_upper(rule.effect_on);
-            return Transformation { is_upper_case: _is_upper_case, target: None, rule };
+            return Transformation { is_upper_case: effective_upper, target: None, rule };
         }
     }
 
@@ -69,8 +77,17 @@ pub(crate) fn generate_appending_trans(
 }
 
 fn find_root_target(composition: &[Transformation], mut target: usize) -> usize {
-    while let Some(t) = composition[target].target {
+    // Guard against out-of-bounds access and cycles (max depth = composition length).
+    let max_depth = composition.len();
+    let mut depth = 0;
+    while let Some(t) = composition.get(target).and_then(|tr| tr.target) {
         target = t;
+        depth += 1;
+        if depth >= max_depth {
+            // Cycle detected or malformed chain — return current target to avoid infinite loop.
+            debug_assert!(false, "find_root_target: cycle or invalid chain detected");
+            break;
+        }
     }
     target
 }
@@ -248,14 +265,15 @@ fn find_tone_target(composition: &[Transformation], std_style: bool) -> Option<u
             return composition.iter().position(|t| *t == app_vowels[1]);
         }
 
-        let s = flatten_slice(
-            app_vowels,
-            OutputOptions::RAW
-                | OutputOptions::LOWER_CASE
-                | OutputOptions::TONE_LESS
-                | OutputOptions::MARK_LESS,
-        );
-        return Some(if matches!(s.as_str(), "oa" | "oe" | "uy" | "ue" | "uo") {
+        // Compare raw key chars directly — no heap allocation needed.
+        let mut raw = ['\0'; 4];
+        let raw_len = raw_keys_of(app_vowels, &mut raw);
+        let tone_on_second = raw_len == 2
+            && matches!(
+                (raw[0], raw[1]),
+                ('o', 'a') | ('o', 'e') | ('u', 'y') | ('u', 'e') | ('u', 'o')
+            );
+        return Some(if tone_on_second {
             composition.iter().position(|t| *t == app_vowels[1]).unwrap_or(0)
         } else {
             composition.iter().position(|t| *t == app_vowels[0]).unwrap_or(0)
@@ -263,20 +281,14 @@ fn find_tone_target(composition: &[Transformation], std_style: bool) -> Option<u
     }
 
     if appending_vowels_len == 3 {
-        return Some(
-            if flatten_slice(
-                app_vowels,
-                OutputOptions::RAW
-                    | OutputOptions::LOWER_CASE
-                    | OutputOptions::TONE_LESS
-                    | OutputOptions::MARK_LESS,
-            ) == "uye"
-            {
-                composition.iter().position(|t| *t == app_vowels[2]).unwrap_or(0)
-            } else {
-                composition.iter().position(|t| *t == app_vowels[1]).unwrap_or(0)
-            },
-        );
+        let mut raw = ['\0'; 4];
+        let raw_len = raw_keys_of(app_vowels, &mut raw);
+        let is_uye = raw_len == 3 && raw[0] == 'u' && raw[1] == 'y' && raw[2] == 'e';
+        return Some(if is_uye {
+            composition.iter().position(|t| *t == app_vowels[2]).unwrap_or(0)
+        } else {
+            composition.iter().position(|t| *t == app_vowels[1]).unwrap_or(0)
+        });
     }
 
     None
@@ -295,9 +307,12 @@ fn has_valid_tone(composition: &[Transformation], tone: Tone) -> bool {
         return true;
     }
 
-    let last_consonants =
-        flatten_slice(cvc.lc_slice(), OutputOptions::RAW | OutputOptions::LOWER_CASE);
-    !matches!(last_consonants.as_str(), "c" | "k" | "p" | "t" | "ch")
+    // Compare raw key chars directly — no String allocation needed.
+    let lc = cvc.lc_slice();
+    let mut raw = ['\0'; 4];
+    let raw_len = raw_keys_of(lc, &mut raw);
+    let lc_str = &raw[..raw_len];
+    !matches!(lc_str, ['c'] | ['k'] | ['p'] | ['t'] | ['c', 'h'])
 }
 
 fn get_last_tone_transformation(composition: &[Transformation]) -> Option<Transformation> {
@@ -405,19 +420,25 @@ fn extract_cvc_trans(composition: &[Transformation]) -> Cvc {
         }
     }
 
+    // Pre-compute bitmasks once for O(1) lookup in the loop below.
+    let fc_mask: u32 = fc_idxs.iter().fold(0u32, |m, &i| m | (1u32 << i));
+    let vo_mask: u32 = vo_idxs.iter().fold(0u32, |m, &i| m | (1u32 << i));
+    let lc_mask: u32 = lc_idxs.iter().fold(0u32, |m, &i| m | (1u32 << i));
+
     for trans in composition {
         if let Some(target_idx) = trans.target {
-            if fc_idxs.contains(&target_idx) {
+            let bit = if target_idx < MAX_ACTIVE_TRANS { 1u32 << target_idx } else { 0 };
+            if (fc_mask & bit) != 0 {
                 if (res.fc_len as usize) < res.fc.len() {
                     res.fc[res.fc_len as usize] = *trans;
                     res.fc_len += 1;
                 }
-            } else if vo_idxs.contains(&target_idx) {
+            } else if (vo_mask & bit) != 0 {
                 if (res.vo_len as usize) < res.vo.len() {
                     res.vo[res.vo_len as usize] = *trans;
                     res.vo_len += 1;
                 }
-            } else if lc_idxs.contains(&target_idx) && (res.lc_len as usize) < res.lc.len() {
+            } else if (lc_mask & bit) != 0 && (res.lc_len as usize) < res.lc.len() {
                 res.lc[res.lc_len as usize] = *trans;
                 res.lc_len += 1;
             }
@@ -543,11 +564,14 @@ fn find_mark_target(
                 }
 
                 let mut tmp = [Transformation::default(); MAX_ACTIVE_TRANS];
-                let mut tmp_len = composition.len();
-                tmp[..tmp_len].copy_from_slice(composition);
-                tmp[tmp_len] =
+                let base_len = composition.len();
+                if base_len >= MAX_ACTIVE_TRANS {
+                    continue;
+                }
+                let tmp_len = base_len + 1;
+                tmp[..base_len].copy_from_slice(composition);
+                tmp[base_len] =
                     Transformation { rule: *rule, target: Some(target), is_upper_case: false };
-                tmp_len += 1;
 
                 if is_valid(&tmp[..tmp_len], false) {
                     return (Some(target), Some(*rule));
@@ -723,21 +747,24 @@ pub(crate) fn generate_transformations(
         }
 
         let mut new_comp = [Transformation::default(); MAX_ACTIVE_TRANS];
-        let mut new_len = composition.len();
-        new_comp[..new_len].copy_from_slice(composition);
-        new_comp[new_len] = out.as_slice()[0];
-        new_len += 1;
+        let base_len = composition.len();
+        // Only attempt the validity check if there is room for one more transformation.
+        if base_len < MAX_ACTIVE_TRANS {
+            let new_len = base_len + 1;
+            new_comp[..base_len].copy_from_slice(composition);
+            new_comp[base_len] = out.as_slice()[0];
 
-        if is_valid(&new_comp[..new_len], true) {
-        } else if let (Some(target2), Some(mut virtual_rule)) =
-            find_target(&new_comp[..new_len], applicable_rules, flags)
-        {
-            virtual_rule.key = '\0';
-            out.push(Transformation {
-                rule: virtual_rule,
-                target: Some(target2),
-                is_upper_case: false,
-            });
+            if is_valid(&new_comp[..new_len], true) {
+            } else if let (Some(target2), Some(mut virtual_rule)) =
+                find_target(&new_comp[..new_len], applicable_rules, flags)
+            {
+                virtual_rule.key = '\0';
+                out.push(Transformation {
+                    rule: virtual_rule,
+                    target: Some(target2),
+                    is_upper_case: false,
+                });
+            }
         }
     } else {
         let flat = flatten_slice(
@@ -773,22 +800,25 @@ pub(crate) fn generate_transformations(
                 };
 
                 let mut tmp = [Transformation::default(); MAX_ACTIVE_TRANS];
-                let mut tmp_len = composition.len();
-                tmp[..tmp_len].copy_from_slice(composition);
-                tmp[tmp_len] = trans;
-                tmp_len += 1;
+                let base_len = composition.len();
+                // Only attempt if there is room for one more transformation.
+                if base_len < MAX_ACTIVE_TRANS {
+                    let tmp_len = base_len + 1;
+                    tmp[..base_len].copy_from_slice(composition);
+                    tmp[base_len] = trans;
 
-                if let (Some(target), Some(applicable_rule)) =
-                    find_target(&tmp[..tmp_len], applicable_rules, flags)
-                    && target_idx != Some(target)
-                {
-                    out.push(trans);
-                    out.push(Transformation {
-                        rule: applicable_rule,
-                        target: Some(target),
-                        is_upper_case,
-                    });
-                    return;
+                    if let (Some(target), Some(applicable_rule)) =
+                        find_target(&tmp[..tmp_len], applicable_rules, flags)
+                        && target_idx != Some(target)
+                    {
+                        out.push(trans);
+                        out.push(Transformation {
+                            rule: applicable_rule,
+                            target: Some(target),
+                            is_upper_case,
+                        });
+                        return;
+                    }
                 }
             }
         }

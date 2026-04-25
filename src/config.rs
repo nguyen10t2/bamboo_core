@@ -48,3 +48,30 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_flags_from_flags_roundtrip() {
+        let configs = [
+            Config { free_tone_marking: true, std_tone_style: true, auto_correct: true },
+            Config { free_tone_marking: false, std_tone_style: false, auto_correct: false },
+            Config { free_tone_marking: true, std_tone_style: false, auto_correct: true },
+            Config { free_tone_marking: false, std_tone_style: true, auto_correct: false },
+        ];
+        for original in configs {
+            let flags = original.to_flags();
+            let restored = Config::from_flags(flags);
+            assert_eq!(original, restored, "Round-trip failed for {original:?}");
+        }
+    }
+
+    #[test]
+    fn default_config_flags() {
+        let cfg = Config::default();
+        // Default: all three enabled → flags = 0b111 = 7
+        assert_eq!(cfg.to_flags(), 7);
+    }
+}

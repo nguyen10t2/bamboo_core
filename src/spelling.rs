@@ -289,3 +289,59 @@ pub fn is_valid_cvc_chars(fc: &[char], vo: &[char], lc: &[char], full: bool) -> 
 
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_simple_syllables() {
+        // "ba", "me", "di", "co", "tu"
+        assert!(is_valid_cvc("b", "a", "", false));
+        assert!(is_valid_cvc("m", "e", "", false));
+        assert!(is_valid_cvc("d", "i", "", false));
+        assert!(is_valid_cvc("c", "o", "", false));
+        assert!(is_valid_cvc("t", "u", "", false));
+    }
+
+    #[test]
+    fn valid_cvc_with_final_consonant() {
+        // "ban", "con", "mat", "toc"
+        assert!(is_valid_cvc("b", "a", "n", true));
+        assert!(is_valid_cvc("c", "o", "n", true));
+        assert!(is_valid_cvc("m", "a", "t", true));
+        assert!(is_valid_cvc("t", "o", "c", true));
+    }
+
+    #[test]
+    fn invalid_consonant_vowel_combinations() {
+        // Unknown initial consonant cluster
+        assert!(!is_valid_cvc("bb", "a", "", true));
+        // Unknown initial consonant cluster
+        assert!(!is_valid_cvc("px", "a", "", true));
+        // Vowel that doesn't exist in Vietnamese
+        assert!(!is_valid_cvc("b", "z", "", true));
+    }
+
+    #[test]
+    fn valid_no_initial_consonant() {
+        // "an", "em", "oi"
+        assert!(is_valid_cvc("", "a", "n", true));
+        assert!(is_valid_cvc("", "e", "m", true));
+        assert!(is_valid_cvc("", "oi", "", false));
+    }
+
+    #[test]
+    fn valid_chars_variant_matches_str_variant() {
+        let cases =
+            [("b", "a", "n"), ("t", "oa", ""), ("", "oi", ""), ("kh", "u", ""), ("", "uye", "")];
+        for (fc, vo, lc) in cases {
+            let str_result = is_valid_cvc(fc, vo, lc, false);
+            let fc_chars: Vec<char> = fc.chars().collect();
+            let vo_chars: Vec<char> = vo.chars().collect();
+            let lc_chars: Vec<char> = lc.chars().collect();
+            let chars_result = is_valid_cvc_chars(&fc_chars, &vo_chars, &lc_chars, false);
+            assert_eq!(str_result, chars_result, "Mismatch for ({fc:?}, {vo:?}, {lc:?})");
+        }
+    }
+}

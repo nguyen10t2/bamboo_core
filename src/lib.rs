@@ -34,8 +34,7 @@
 //! // Create an engine with the standard Telex input method
 //! let mut engine = Engine::new(InputMethod::telex());
 //!
-//! // Optional: pre-populate DFA for peak performance
-//! engine.warm_up();
+//! // No explicit warm-up needed: the DFA learns on demand (lazy JIT)
 //!
 //! // Process a string and get the output immediately
 //! let word = engine.process("tieengs", Mode::Vietnamese);
