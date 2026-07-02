@@ -61,10 +61,10 @@ fn write_canvas_slice(composition: &[Transformation], options: OutputOptions, ou
                 appending_len += 1;
             }
         } else if let Some(target) = trans.target
-            && target < len
+            && (target as usize) < len
         {
-            next_effect[idx] = head_effect[target];
-            head_effect[target] = Some(idx);
+            next_effect[idx] = head_effect[target as usize];
+            head_effect[target as usize] = Some(idx);
         }
     }
 
@@ -157,7 +157,7 @@ pub(crate) fn first_canvas_char_in_suffix(
     } else {
         let mut c = appending_trans.rule.effect_on;
         for trans in &composition[start..] {
-            if trans.target != Some(target_abs_idx) {
+            if trans.target != Some(target_abs_idx as u8) {
                 continue;
             }
             match trans.rule.effect_type {

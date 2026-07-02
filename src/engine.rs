@@ -15,7 +15,8 @@ pub struct Transformation {
     pub rule: Rule,
     /// The index of the transformation in the composition that this transformation targets (if any).
     /// For example, a tone mark transformation targets an earlier vowel.
-    pub target: Option<usize>,
+    /// Uses u8 since MAX_ACTIVE_TRANS = 16, saving 14 bytes vs Option<usize>.
+    pub target: Option<u8>,
     /// Whether the resulting character should be rendered as uppercase.
     pub is_upper_case: bool,
 }
@@ -398,7 +399,7 @@ impl Engine {
         if offset != 0 {
             for t in scratch.as_mut_slice().iter_mut() {
                 if let Some(target) = t.target {
-                    t.target = Some(target.saturating_sub(offset));
+                    t.target = Some(target.saturating_sub(offset as u8));
                 }
             }
         }
@@ -408,7 +409,7 @@ impl Engine {
         if offset != 0 {
             for t in scratch.as_mut_slice().iter_mut() {
                 if let Some(target) = t.target {
-                    t.target = Some(target + offset);
+                    t.target = Some(target + offset as u8);
                 }
             }
         }

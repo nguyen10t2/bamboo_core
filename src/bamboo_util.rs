@@ -76,11 +76,11 @@ pub(crate) fn generate_appending_trans(
     new_appending_trans(lower_key, is_upper_case)
 }
 
-fn find_root_target(composition: &[Transformation], mut target: usize) -> usize {
+fn find_root_target(composition: &[Transformation], mut target: u8) -> u8 {
     // Guard against out-of-bounds access and cycles (max depth = composition length).
     let max_depth = composition.len();
     let mut depth = 0;
-    while let Some(t) = composition.get(target).and_then(|tr| tr.target) {
+    while let Some(t) = composition.get(target as usize).and_then(|tr| tr.target) {
         target = t;
         depth += 1;
         if depth >= max_depth {
@@ -136,18 +136,18 @@ pub(crate) fn is_valid(composition: &[Transformation], input_is_full_complete: b
 
         for t in composition {
             if let Some(target) = t.target
-                && target < MAX_ACTIVE_TRANS
+                && (target as usize) < MAX_ACTIVE_TRANS
             {
                 match t.rule.effect_type {
                     EffectType::MarkTransformation => {
                         if t.rule.effect == Mark::Raw as u8 {
-                            resolved[target] = composition[target].rule.key;
+                            resolved[target as usize] = composition[target as usize].rule.key;
                         } else {
-                            resolved[target] = add_mark_to_char(resolved[target], t.rule.effect);
+                            resolved[target as usize] = add_mark_to_char(resolved[target as usize], t.rule.effect);
                         }
                     }
                     EffectType::ToneTransformation => {
-                        resolved[target] = add_tone_to_char(resolved[target], t.rule.effect);
+                        resolved[target as usize] = add_tone_to_char(resolved[target as usize], t.rule.effect);
                     }
                     _ => {}
                 }
@@ -217,7 +217,7 @@ impl Cvc {
     }
 }
 
-fn find_tone_target(composition: &[Transformation], std_style: bool) -> Option<usize> {
+fn find_tone_target(composition: &[Transformation], std_style: bool) -> Option<u8> {
     if composition.is_empty() {
         return None;
     }
@@ -237,24 +237,24 @@ fn find_tone_target(composition: &[Transformation], std_style: bool) -> Option<u
     let app_vowels = &appending_vowels[..appending_vowels_len];
 
     if appending_vowels_len == 1 {
-        return composition.iter().position(|t| *t == app_vowels[0]);
+        return composition.iter().position(|t| *t == app_vowels[0]).map(|v| v as u8);
     }
 
     if appending_vowels_len == 2 && std_style {
-        let mut target: Option<usize> = None;
+        let mut target: Option<u8> = None;
         for trans in vowels {
             if trans.rule.result == 'ơ' || trans.rule.result == 'ê' {
                 target =
                     Some(trans.target.unwrap_or_else(|| {
-                        composition.iter().position(|t| t == trans).unwrap_or(0)
+                        composition.iter().position(|t| t == trans).unwrap_or(0) as u8
                     }));
             }
         }
         if target.is_none() {
             target = Some(if !lc.is_empty() {
-                composition.iter().position(|t| *t == app_vowels[1]).unwrap_or(0)
+                composition.iter().position(|t| *t == app_vowels[1]).unwrap_or(0) as u8
             } else {
-                composition.iter().position(|t| *t == app_vowels[0]).unwrap_or(0)
+                composition.iter().position(|t| *t == app_vowels[0]).unwrap_or(0) as u8
             });
         }
         return target;
@@ -262,7 +262,7 @@ fn find_tone_target(composition: &[Transformation], std_style: bool) -> Option<u
 
     if appending_vowels_len == 2 {
         if !lc.is_empty() {
-            return composition.iter().position(|t| *t == app_vowels[1]);
+            return composition.iter().position(|t| *t == app_vowels[1]).map(|v| v as u8);
         }
 
         // Compare raw key chars directly — no heap allocation needed.
@@ -274,9 +274,9 @@ fn find_tone_target(composition: &[Transformation], std_style: bool) -> Option<u
                 ('o', 'a') | ('o', 'e') | ('u', 'y') | ('u', 'e') | ('u', 'o')
             );
         return Some(if tone_on_second {
-            composition.iter().position(|t| *t == app_vowels[1]).unwrap_or(0)
+            composition.iter().position(|t| *t == app_vowels[1]).unwrap_or(0) as u8
         } else {
-            composition.iter().position(|t| *t == app_vowels[0]).unwrap_or(0)
+            composition.iter().position(|t| *t == app_vowels[0]).unwrap_or(0) as u8
         });
     }
 
@@ -285,9 +285,9 @@ fn find_tone_target(composition: &[Transformation], std_style: bool) -> Option<u
         let raw_len = raw_keys_of(app_vowels, &mut raw);
         let is_uye = raw_len == 3 && raw[0] == 'u' && raw[1] == 'y' && raw[2] == 'e';
         return Some(if is_uye {
-            composition.iter().position(|t| *t == app_vowels[2]).unwrap_or(0)
+            composition.iter().position(|t| *t == app_vowels[2]).unwrap_or(0) as u8
         } else {
-            composition.iter().position(|t| *t == app_vowels[1]).unwrap_or(0)
+            composition.iter().position(|t| *t == app_vowels[1]).unwrap_or(0) as u8
         });
     }
 
@@ -326,7 +326,7 @@ fn get_last_tone_transformation(composition: &[Transformation]) -> Option<Transf
 fn is_free(composition: &[Transformation], trans_idx: usize, effect_type: EffectType) -> bool {
     for t in composition {
         if let Some(target) = t.target
-            && target == trans_idx
+            && target as usize == trans_idx
             && t.rule.effect_type == effect_type
         {
             return false;
@@ -427,7 +427,7 @@ fn extract_cvc_trans(composition: &[Transformation]) -> Cvc {
 
     for trans in composition {
         if let Some(target_idx) = trans.target {
-            let bit = if target_idx < MAX_ACTIVE_TRANS { 1u32 << target_idx } else { 0 };
+            let bit = if (target_idx as usize) < MAX_ACTIVE_TRANS { 1u32 << target_idx } else { 0 };
             if (fc_mask & bit) != 0 {
                 if (res.fc_len as usize) < res.fc.len() {
                     res.fc[res.fc_len as usize] = *trans;
@@ -499,7 +499,7 @@ pub(crate) fn extract_last_word<'a>(
 
 fn is_effective(composition: &[Transformation], target_idx: usize, new_rule: &Rule) -> bool {
     for t in composition {
-        if t.target == Some(target_idx) && t.rule.effect_type == new_rule.effect_type {
+        if t.target == Some(target_idx as u8) && t.rule.effect_type == new_rule.effect_type {
             if t.rule.effect == new_rule.effect {
                 return false;
             }
@@ -507,8 +507,8 @@ fn is_effective(composition: &[Transformation], target_idx: usize, new_rule: &Ru
         }
     }
 
-    let appending_idx = find_root_target(composition, target_idx);
-    let appending = &composition[appending_idx];
+    let appending_idx = find_root_target(composition, target_idx as u8);
+    let appending = &composition[appending_idx as usize];
 
     let mut current_char = appending.rule.effect_on;
     for t in composition {
@@ -550,16 +550,16 @@ fn is_effective(composition: &[Transformation], target_idx: usize, new_rule: &Ru
 fn find_mark_target(
     composition: &[Transformation],
     rules: &[Rule],
-) -> (Option<usize>, Option<Rule>) {
+) -> (Option<u8>, Option<Rule>) {
     for (idx, trans) in composition.iter().enumerate().rev() {
         for rule in rules {
             if rule.effect_type != EffectType::MarkTransformation {
                 continue;
             }
             if trans.rule.result == rule.effect_on && rule.effect > 0 {
-                let target = find_root_target(composition, idx);
+                let target = find_root_target(composition, idx as u8);
 
-                if !is_effective(composition, target, rule) {
+                if !is_effective(composition, target as usize, rule) {
                     continue;
                 }
 
@@ -588,13 +588,13 @@ pub(crate) fn find_target(
     composition: &[Transformation],
     applicable_rules: &[Rule],
     flags: u32,
-) -> (Option<usize>, Option<Rule>) {
+) -> (Option<u8>, Option<Rule>) {
     for applicable_rule in applicable_rules {
         if applicable_rule.effect_type != EffectType::ToneTransformation {
             continue;
         }
 
-        let mut target: Option<usize> = None;
+            let mut target: Option<u8> = None;
         if (flags & EFREE_TONE_MARKING) != 0 {
             let tone = applicable_rule.get_tone();
             if has_valid_tone(composition, tone) {
@@ -605,21 +605,21 @@ pub(crate) fn find_target(
         {
             for (idx, t) in composition.iter().enumerate() {
                 if *t == last_appending {
-                    target = Some(idx);
+                    target = Some(idx as u8);
                     break;
                 }
             }
         }
 
         let Some(t_idx) = target else { continue };
-        let effective = is_effective(composition, t_idx, applicable_rule);
+        let effective = is_effective(composition, t_idx as usize, applicable_rule);
         if !effective {
             continue;
         }
 
         if applicable_rule.effect == Tone::None as u8
-            && is_free(composition, t_idx, EffectType::ToneTransformation)
-            && add_tone_to_char(composition[t_idx].rule.result, 0) == composition[t_idx].rule.result
+            && is_free(composition, t_idx as usize, EffectType::ToneTransformation)
+            && add_tone_to_char(composition[t_idx as usize].rule.result, 0) == composition[t_idx as usize].rule.result
         {
             target = None;
         }
@@ -640,7 +640,7 @@ fn generate_undo_transformations(
 ) {
     for rule in rules {
         if rule.effect_type == EffectType::ToneTransformation {
-            let mut target: Option<usize> = None;
+        let mut target: Option<u8> = None;
             if (flags & EFREE_TONE_MARKING) != 0 {
                 let tone = rule.get_tone();
                 if has_valid_tone(composition, tone) {
@@ -651,7 +651,7 @@ fn generate_undo_transformations(
             {
                 for (idx, t) in composition.iter().enumerate() {
                     if *t == last_appending {
-                        target = Some(idx);
+                        target = Some(idx as u8);
                         break;
                     }
                 }
@@ -668,7 +668,7 @@ fn generate_undo_transformations(
                 appended_len: 0,
             };
 
-            if is_effective(composition, target, &undo_rule) {
+            if is_effective(composition, target as usize, &undo_rule) {
                 out.push(Transformation {
                     target: Some(target),
                     is_upper_case: false,
@@ -678,7 +678,7 @@ fn generate_undo_transformations(
         } else if rule.effect_type == EffectType::MarkTransformation {
             for (idx, trans) in composition.iter().enumerate().rev() {
                 if trans.rule.result == rule.effect_on {
-                    let target = find_root_target(composition, idx);
+                    let target = find_root_target(composition, idx as u8);
 
                     let undo_rule = Rule {
                         key: '\0',
@@ -690,7 +690,7 @@ fn generate_undo_transformations(
                         appended_len: 0,
                     };
 
-                    if is_effective(composition, target, &undo_rule) {
+                    if is_effective(composition, target as usize, &undo_rule) {
                         out.push(Transformation {
                             target: Some(target),
                             is_upper_case: false,
@@ -732,7 +732,7 @@ pub(crate) fn generate_transformations(
                     appended: ['\0'; 2],
                     appended_len: 0,
                 },
-                target: Some(composition.len() - 1),
+                target: Some((composition.len() - 1) as u8),
                 is_upper_case: false,
             });
         }
@@ -786,7 +786,7 @@ pub(crate) fn generate_transformations(
             if app_vowels_len > 0 {
                 let target_idx = composition.iter().position(|t| *t == app_vowels[0]);
                 let trans = Transformation {
-                    target: target_idx,
+                    target: target_idx.map(|v| v as u8),
                     is_upper_case: false,
                     rule: Rule {
                         effect_type: EffectType::MarkTransformation,
@@ -809,7 +809,7 @@ pub(crate) fn generate_transformations(
 
                     if let (Some(target), Some(applicable_rule)) =
                         find_target(&tmp[..tmp_len], applicable_rules, flags)
-                        && target_idx != Some(target)
+                        && target_idx.map(|v| v as u8) != Some(target)
                     {
                         out.push(trans);
                         out.push(Transformation {
