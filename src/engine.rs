@@ -189,7 +189,7 @@ impl Engine {
         non_ascii_effect_keys.dedup();
 
         Self {
-            committed_text: String::new(),
+            committed_text: String::with_capacity(256),
             active_buffer: [Transformation::default(); MAX_ACTIVE_TRANS],
             active_len: 0,
             input_method,
@@ -498,7 +498,8 @@ impl Engine {
         let lower_key = lower(key);
         let is_upper_case = is_upper(key);
 
-        if mode == Mode::English || !self.can_process_key_raw(lower_key) {
+        // English mode: skip all Vietnamese processing
+        if mode == Mode::English {
             if crate::utils::is_word_break_symbol(lower_key) {
                 self.commit();
             }
@@ -511,7 +512,8 @@ impl Engine {
             return;
         }
 
-        // DFA Fast Path
+        // DFA Fast Path: if DFA has a cached transition, key is valid.
+        // Skip can_process_key_raw entirely.
         if lower_key.is_ascii() && !is_upper_case {
             let next_state_id =
                 self.dfa.get_state(self.current_state_id).transitions[lower_key as usize];
@@ -522,6 +524,20 @@ impl Engine {
                 self.active_buffer[..self.active_len].copy_from_slice(comp);
                 return;
             }
+        }
+
+        // Slow path: validate key and handle word breaks
+        if !self.can_process_key_raw(lower_key) {
+            if crate::utils::is_word_break_symbol(lower_key) {
+                self.commit();
+            }
+            let trans = crate::bamboo_util::new_appending_trans(lower_key, is_upper_case);
+            self.push_active(trans);
+            if crate::utils::is_word_break_symbol(lower_key) {
+                self.commit();
+            }
+            self.current_state_id = 0;
+            return;
         }
 
         let mut work = self.work_comp;
