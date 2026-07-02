@@ -6,16 +6,22 @@
 
 A high-performance Vietnamese input method engine (IME) core written in Rust, inherited and optimized from the original [bamboo-core](https://github.com/BambooEngine/bamboo-core) in Go.
 
-## 🚀 Version 0.3.5: High-Performance Snapshot
+## 🚀 Version 0.3.6: Pipeline & Cache Optimization
 
-This version marks a significant milestone in efficiency and stability, achieving a **Zero-Allocation Hot Path** while maintaining absolute linguistic correctness.
+This release focuses on hot-path performance, achieving a **2× speedup** on the DFA fast path through pipeline reorganization and memory layout optimization.
 
 ### Key Enhancements:
-- **Zero-Allocation Processing:** Replaced `Vec` with stack-allocated `TransformationStack` for all intermediate processing, making the engine ideal for WASM and embedded systems.
-- **Lazy JIT DFA Engine:** 20x performance improvement (~490µs -> ~23µs per processing cycle) through dynamic state caching.
-- **Robust State Recovery:** Completely refactored `remove_last_char` and backspace logic to ensure the internal DFA state and transformation targets are always perfectly synchronized.
-- **Pre-compilation Support:** New `Engine::warm_up()` method to pre-populate the DFA with common Vietnamese syllables.
-- **Optimized Validation:** High-performance single-pass O(N) spelling and syllable validation.
+- **DFA Fast Path 2× Faster:** Reorganized `process_key` into three distinct paths (English → DFA fast → slow), allowing the DFA fast path to skip redundant `can_process_key_raw` validation.
+- **Compact Transformation Struct:** Reduced `Transformation` from 48 bytes to 28 bytes (42% smaller) by using `Option<u8>` for target indices. This improves CPU cache utilization for all buffer operations.
+- **Pre-allocated Buffers:** `committed_text` now pre-allocates 256 bytes to avoid reallocation during typical usage.
+
+### Performance (vs 0.3.5 baseline):
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| DFA fast path | ~100 ns | **~45 ns** | 2.2× |
+| DFA miss path | ~90 ns | **~43 ns** | 2.1× |
+| `Transformation` size | 48 bytes | **28 bytes** | 42% smaller |
+| `[Transformation; 16]` | 768 bytes | **448 bytes** | 42% smaller |
 
 ## 💡 Origin & Philosophy
 
@@ -34,7 +40,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bamboo-core = "0.3.3"
+bamboo-core = "0.3.6"
 ```
 
 ## 🛠️ Quick Start

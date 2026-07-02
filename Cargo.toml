@@ -1,6 +1,6 @@
 [package]
 name = "bamboo-core"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2024"
 
 description = "Vietnamese input method engine written in Rust"
@@ -17,7 +17,8 @@ include = [
     "tests/**",
     "Cargo.toml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
 ]
 
 [dependencies]
