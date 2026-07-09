@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.8] - 2026-07-09
+
+### Docs
+- Rewrote README with usage examples (incremental processing, delta updates, backspace, output customization).
+
 ## [0.3.7] - 2026-07-09
 
 ### Performance

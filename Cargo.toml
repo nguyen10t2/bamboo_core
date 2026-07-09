@@ -1,6 +1,6 @@
 [package]
 name = "bamboo-core"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2024"
 
 description = "Vietnamese input method engine written in Rust"
