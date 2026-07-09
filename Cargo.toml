@@ -33,3 +33,6 @@ wasm = ["wasm-bindgen"]
 [[bench]]
 name = "engine_bench"
 harness = false
+
+[dev-dependencies]
+uvie = "2.1.1"
