@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.7] - 2026-07-09
+
+### Performance
+- **O(1) Backspace via Snapshot Stack (~11,130ns → ~144ns, 77× faster):** Replaced the O(n) replay-based `remove_last_char` with a stack-allocated snapshot approach. Before each keystroke mutates the composition, the engine saves a lightweight snapshot (active buffer + state id). On backspace, the previous state is restored in O(1) via `memcpy`. All snapshots are stack-allocated (`[Snapshot; 16]`), zero heap allocation.
+
+### Internal
+- Added `Snapshot` struct (private) for backspace state management.
+- `process_key()`: pushes snapshot before DFA fast path (if buffer non-empty) and before slow-path mutations.
+- `commit()` / `reset()`: clear snapshot stack.
+- `remove_last_char()`: rewritten to use `pop_snapshot()` instead of replaying keystrokes through a temporary engine.
+
 ## [0.3.6] - 2026-07-03
 
 ### Performance
