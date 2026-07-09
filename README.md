@@ -19,7 +19,7 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 
 ```toml
 [dependencies]
-bamboo-core = "0.3.9"
+bamboo-core = "0.3.10"
 ```
 
 ## Quick Start
