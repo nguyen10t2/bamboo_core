@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.11] - 2026-07-09
+
+### Docs
+- Clarified `process_key_delta` as 3-way diff API: `(backspace_count, backspaces_bytes, inserted_suffix)`.
+- Added contract explanation and examples in rustdoc and README.
+
 ## [0.3.10] - 2026-07-09
 
 ### Docs

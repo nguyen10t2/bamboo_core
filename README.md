@@ -19,7 +19,7 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 
 ```toml
 [dependencies]
-bamboo-core = "0.3.10"
+bamboo-core = "0.3.11"
 ```
 
 ## Quick Start
@@ -58,19 +58,30 @@ assert_eq!(engine.output(), "tiếng");
 
 ### Delta Updates
 
-For efficient text editor integration, use `process_key_delta` to get only the diff:
+For efficient text editor integration, use `process_key_delta` to get a **3-way diff**:
 
 ```rust
 use bamboo_core::{Engine, Mode, InputMethod};
 
 let mut engine = Engine::new(InputMethod::telex());
 
-let (backspaces, _, inserted) = engine.process_key_delta('a', Mode::Vietnamese);
-// backspaces = 0, inserted = "a"
+let (bs, _, ins) = engine.process_key_delta('a', Mode::Vietnamese);
+assert_eq!(bs, 0);
+assert_eq!(ins, "a");
 
-let (backspaces, _, inserted) = engine.process_key_delta('s', Mode::Vietnamese);
-// backspaces = 1, inserted = "á"  (replaces "a" with "á")
+// previous = "a", new = "á"
+let (bs, _, ins) = engine.process_key_delta('s', Mode::Vietnamese);
+assert_eq!(bs, 1);     // delete 1 char ("a")
+assert_eq!(ins, "á");  // insert "á"
+// result: "" + "á" = "á"
 ```
+
+Contract:
+```text
+previous = [common_prefix] + [backspace_count chars to delete]
+new      = [common_prefix] + [inserted_suffix]
+```
+Frontend does not need to compute LCP — the engine does it.
 
 ## Backspace
 

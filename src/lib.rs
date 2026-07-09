@@ -36,8 +36,8 @@
 //! assert_eq!(engine.output(), "tiếng");
 //! ```
 //!
-//! For text editors, use [`Engine::process_key_delta`] to get only the diff
-//! (number of backspaces + new text to insert):
+//! For text editors, use [`Engine::process_key_delta`] to get a **3-way diff**
+//! (keep prefix + delete suffix + insert new):
 //!
 //! ```rust
 //! use bamboo_core::{Engine, Mode, InputMethod};
@@ -49,8 +49,10 @@
 //! assert_eq!(ins, "a");
 //!
 //! let (bs, _, ins) = engine.process_key_delta('s', Mode::Vietnamese);
-//! assert_eq!(bs, 1); // delete "a"
-//! assert_eq!(ins, "á"); // insert "á"
+//! // previous = "a", new = "á"
+//! // keep prefix = 0 chars, delete = 1 ("a"), insert = "á"
+//! assert_eq!(bs, 1);
+//! assert_eq!(ins, "á");
 //! ```
 //!
 //! ## Convenience API

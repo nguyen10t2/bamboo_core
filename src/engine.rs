@@ -489,15 +489,45 @@ impl Engine {
         (lcp_chars, lcp_bytes)
     }
 
-    /// Processes a single key and returns the "delta" change required for a text editor.
+    /// Processes a single key and returns a **3-way diff** for efficient text editor updates.
     ///
-    /// This is useful for IMEs to update the preedit text efficiently without rewriting the entire word.
+    /// Instead of rewriting the entire preedit, the frontend only needs to apply:
+    /// 1. Keep the common prefix unchanged.
+    /// 2. Delete `backspace_count` characters from the end of the previous preedit.
+    /// 3. Append `inserted_suffix`.
+    ///
+    /// ```text
+    /// previous_preedit = [common_prefix] + [backspace_count chars to delete]
+    /// new_preedit      = [common_prefix] + [inserted_suffix]
+    /// ```
+    ///
+    /// The common prefix length is implicit: `previous_preedit.len() - backspace_count`
+    /// (in characters). The frontend does not need to compute LCP/LCS — the engine does it.
     ///
     /// # Returns
-    /// A tuple containing:
-    /// 1. `backspaces_chars`: Number of characters to delete from the end of the previous preedit.
-    /// 2. `backspaces_bytes`: Number of UTF-8 bytes to delete.
-    /// 3. `inserted`: The new string to append after deletion.
+    ///
+    /// `(backspace_count, backspaces_bytes, inserted_suffix)`:
+    /// - `backspace_count`: Number of **characters** to delete from the end of the previous preedit.
+    /// - `backspaces_bytes`: Number of **UTF-8 bytes** to delete (for byte-oriented editors).
+    /// - `inserted_suffix`: The new string to append after deletion.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use bamboo_core::{Engine, Mode, InputMethod};
+    ///
+    /// let mut engine = Engine::new(InputMethod::telex());
+    ///
+    /// let (bs, _, ins) = engine.process_key_delta('a', Mode::Vietnamese);
+    /// assert_eq!(bs, 0);
+    /// assert_eq!(ins, "a");
+    ///
+    /// let (bs, _, ins) = engine.process_key_delta('s', Mode::Vietnamese);
+    /// // previous = "a", new = "á"
+    /// // keep prefix = 1 - 1 = 0, delete = 1 ("a"), insert = "á"
+    /// assert_eq!(bs, 1);
+    /// assert_eq!(ins, "á");
+    /// ```
     pub fn process_key_delta(&mut self, key: char, mode: Mode) -> (usize, usize, &str) {
         self.process_key(key, mode);
 
@@ -505,34 +535,34 @@ impl Engine {
         let active = &self.active_buffer[..active_len];
         crate::flattener::flatten_slice_into(active, OutputOptions::NONE, &mut self.delta_buf);
 
-        let (_lcp_chars, lcp_bytes) =
+        let (_prefix_len, lcp_bytes) =
             Self::lcp_chars_and_bytes(&self.prev_preedit, &self.delta_buf);
 
         let prev_bytes = self.prev_preedit.len();
 
         // Count only the suffix chars after the common prefix — O(suffix_len) instead of O(total).
-        let backspaces_chars = self.prev_preedit[lcp_bytes..].chars().count();
+        let backspace_count = self.prev_preedit[lcp_bytes..].chars().count();
         let backspaces_bytes = prev_bytes.saturating_sub(lcp_bytes);
 
         std::mem::swap(&mut self.prev_preedit, &mut self.delta_buf);
-        let inserted = &self.prev_preedit[lcp_bytes..];
-        (backspaces_chars, backspaces_bytes, inserted)
+        let inserted_suffix = &self.prev_preedit[lcp_bytes..];
+        (backspace_count, backspaces_bytes, inserted_suffix)
     }
 
     /// Similar to [`Self::process_key_delta`], but writes the inserted string into a provided buffer.
     ///
     /// # Returns
-    /// The number of backspaces (characters) to perform.
+    /// `backspace_count` — number of characters to delete from the end of the previous preedit.
     pub fn process_key_delta_into(
         &mut self,
         key: char,
         mode: Mode,
         inserted: &mut String,
     ) -> usize {
-        let (backspaces_chars, _backspaces_bytes, ins) = self.process_key_delta(key, mode);
+        let (backspace_count, _backspaces_bytes, ins) = self.process_key_delta(key, mode);
         inserted.clear();
         inserted.push_str(ins);
-        backspaces_chars
+        backspace_count
     }
 
     /// Processes a single character.
