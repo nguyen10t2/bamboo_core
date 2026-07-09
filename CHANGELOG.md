@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.9] - 2026-07-09
+
+### Performance
+- **English mode optimized:** Skip DFA lookup, direct buffer append. Long identifiers 18.5× faster than uvie.
+
+### Docs
+- Added benchmark comparison table (bamboo-core vs uvie) in README.
+- New real-world benchmarks: english passthrough, long identifier, backspace spam, commit latency, worst-case syllable, random typing.
+
 ## [0.3.8] - 2026-07-09
 
 ### Docs
