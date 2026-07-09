@@ -31,7 +31,7 @@ Bamboo provides a flexible Vietnamese typing solution based on **rule-based tran
 
 The core philosophy is inspired by:
 - **[bogo.js](https://github.com/lewtds/bogo.js)**: Pioneering the transformation model.
-- **GoTiengViet**: The gold standard for accuracy and user experience.
+- **[bamboo-core](https://github.com/BambooEngine/bamboo-core)**: The gold standard for accuracy and user experience.
 - **[NexusKey](https://github.com/phatMT97/NexusKey)**: Modern state machine and array optimization techniques.
 
 ## 📦 Installation
@@ -62,8 +62,8 @@ fn main() {
 ## 👥 Credits
 
 - **Rust Port & Optimization:** Dao Trong Nguyen ([@nguyen10t2](https://github.com/nguyen10t2))
-- **Original Author (Go):** Luong Thanh Lam ([@lamtq](https://github.com/lamtq))
-- **Technical Consultant:** Mai Thanh Phát ([@phatMT97](https://github.com/phatMT97)) - Author of **NexusKey**.
+- **Original Author (Go):** Lam ([@lamtq](https://github.com/t1ld3x))
+- **Technical Consultant:** Mai Tan Phat ([@phatMT97](https://github.com/phatMT97)) - Author of **VKey**.
 
 ## 📜 License
 
