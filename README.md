@@ -100,6 +100,41 @@ assert_eq!(engine.get_processed_str(OutputOptions::TONE_LESS), "Trăng");
 assert_eq!(engine.get_processed_str(OutputOptions::FULL_TEXT), "Trăng");
 ```
 
+## Benchmarks
+
+Benchmarked against [uvie](https://github.com/thuupx/uvie-rs) v2.1.1 on the same machine. Lower is better.
+
+### Core Operations
+
+| Benchmark | Bamboo | Uvie | Speedup |
+|---|---:|---:|---:|
+| feed single word (tieengs) | 76 ns | 874 ns | **11.5x** |
+| feed + delta (per key) | 718 ns | 861 ns | **1.2x** |
+| mixed typing (29 chars) | 904 ns | 3,658 ns | **4.0x** |
+| many words (13 words) | 6,745 ns | 11,878 ns | **1.8x** |
+
+### Backspace
+
+| Benchmark | Bamboo | Uvie | Speedup |
+|---|---:|---:|---:|
+| backspace (1x) | 143 ns | 1,066 ns | **7.5x** |
+| backspace x3 | 262 ns | 1,372 ns | **5.2x** |
+| backspace spam (7x) | 405 ns | 1,704 ns | **4.2x** |
+
+### Real-world Scenarios
+
+| Benchmark | Bamboo | Uvie | Speedup |
+|---|---:|---:|---:|
+| english passthrough (code) | 348 ns | 1,506 ns | **4.3x** |
+| long identifier (39 chars) | 566 ns | 10,467 ns | **18.5x** |
+| commit via space | 167 ns | 868 ns | **5.2x** |
+| worst-case syllable (nghieengs) | 98 ns | 990 ns | **10.1x** |
+| random typing (real workload) | 3,892 ns | 8,488 ns | **2.2x** |
+
+> **Note**: Bamboo's cold start (first keystroke) is slower (~19 µs vs ~1.5 µs) due to Engine + DFA allocation. After warmup, the DFA fast path dominates.
+
+Run benchmarks: `cargo bench`
+
 ## Credits
 
 - **Rust Port & Optimization:** Dao Trong Nguyen ([@nguyen10t2](https://github.com/nguyen10t2))

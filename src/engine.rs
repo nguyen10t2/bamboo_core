@@ -542,13 +542,18 @@ impl Engine {
         let lower_key = lower(key);
         let is_upper_case = is_upper(key);
 
-        // English mode: skip all Vietnamese processing
+        // English mode: skip all Vietnamese processing.
+        // Direct buffer append — no DFA lookup, no snapshot.
         if mode == Mode::English {
-            if crate::utils::is_word_break_symbol(lower_key) {
+            if crate::utils::is_word_break_symbol(lower_key) && self.active_len > 0 {
                 self.commit();
             }
-            let trans = crate::bamboo_util::new_appending_trans(lower_key, is_upper_case);
-            self.push_active(trans);
+            if self.active_len >= MAX_ACTIVE_TRANS {
+                self.commit();
+            }
+            self.active_buffer[self.active_len] =
+                crate::bamboo_util::new_appending_trans(lower_key, is_upper_case);
+            self.active_len += 1;
             if crate::utils::is_word_break_symbol(lower_key) {
                 self.commit();
             }
