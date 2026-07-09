@@ -8,6 +8,14 @@ use crate::utils::{is_upper, lower};
 /// Maximum number of active transformations in a single syllable.
 pub const MAX_ACTIVE_TRANS: usize = 16;
 
+/// A lightweight snapshot of the engine state before a keystroke, used for O(1) backspace.
+#[derive(Clone, Copy)]
+struct Snapshot {
+    active_buffer: [Transformation; MAX_ACTIVE_TRANS],
+    active_len: usize,
+    current_state_id: u32,
+}
+
 /// Represents a single keypress or a transformation derived from it (e.g., adding a mark or tone).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
 pub struct Transformation {
@@ -15,7 +23,7 @@ pub struct Transformation {
     pub rule: Rule,
     /// The index of the transformation in the composition that this transformation targets (if any).
     /// For example, a tone mark transformation targets an earlier vowel.
-    /// Uses u8 since MAX_ACTIVE_TRANS = 16, saving 14 bytes vs Option<usize>.
+    /// Uses u8 since MAX_ACTIVE_TRANS = 16, saving 14 bytes vs `Option<usize>`.
     pub target: Option<u8>,
     /// Whether the resulting character should be rendered as uppercase.
     pub is_upper_case: bool,
@@ -144,6 +152,10 @@ pub struct Engine {
 
     dfa: crate::dfa::Dfa,
     current_state_id: u32,
+
+    // Snapshot stack for O(1) backspace — all stack-allocated, zero heap.
+    snapshots: [Snapshot; MAX_ACTIVE_TRANS],
+    snapshot_len: usize,
 }
 
 impl Engine {
@@ -208,6 +220,13 @@ impl Engine {
             delta_buf: String::with_capacity(64),
             dfa: crate::dfa::Dfa::new(),
             current_state_id: 0,
+
+            snapshots: [Snapshot {
+                active_buffer: [Transformation::default(); MAX_ACTIVE_TRANS],
+                active_len: 0,
+                current_state_id: 0,
+            }; MAX_ACTIVE_TRANS],
+            snapshot_len: 0,
         }
     }
 
@@ -226,6 +245,30 @@ impl Engine {
         self.active_len = src.len().min(MAX_ACTIVE_TRANS);
         self.active_buffer[..self.active_len].copy_from_slice(src.as_slice());
         src.clear();
+    }
+
+    #[inline]
+    fn push_snapshot(&mut self) {
+        if self.snapshot_len < MAX_ACTIVE_TRANS {
+            let snap = &mut self.snapshots[self.snapshot_len];
+            snap.active_buffer[..self.active_len].copy_from_slice(&self.active_buffer[..self.active_len]);
+            snap.active_len = self.active_len;
+            snap.current_state_id = self.current_state_id;
+            self.snapshot_len += 1;
+        }
+    }
+
+    #[inline]
+    fn pop_snapshot(&mut self) -> Option<()> {
+        if self.snapshot_len == 0 {
+            return None;
+        }
+        self.snapshot_len -= 1;
+        let snap = &self.snapshots[self.snapshot_len];
+        self.active_len = snap.active_len;
+        self.active_buffer[..self.active_len].copy_from_slice(&snap.active_buffer[..self.active_len]);
+        self.current_state_id = snap.current_state_id;
+        Some(())
     }
 
     /// Returns the current configuration of the engine.
@@ -519,6 +562,10 @@ impl Engine {
             let next_state_id =
                 self.dfa.get_state(self.current_state_id).transitions[lower_key as usize];
             if next_state_id != 0 {
+                // Snapshot before overwriting active buffer (skip if empty — nothing to restore).
+                if self.active_len > 0 {
+                    self.push_snapshot();
+                }
                 self.current_state_id = next_state_id;
                 let comp = self.dfa.get_composition(next_state_id);
                 self.active_len = comp.len().min(MAX_ACTIVE_TRANS);
@@ -532,6 +579,12 @@ impl Engine {
             if crate::utils::is_word_break_symbol(lower_key) {
                 self.commit();
             }
+            // Snapshot before push_active so backspace can restore previous state.
+            // Word breaks trigger commit() which clears snapshots — that's correct
+            // (committed text can't be undone via backspace).
+            if self.active_len > 0 {
+                self.push_snapshot();
+            }
             let trans = crate::bamboo_util::new_appending_trans(lower_key, is_upper_case);
             self.push_active(trans);
             if crate::utils::is_word_break_symbol(lower_key) {
@@ -540,6 +593,9 @@ impl Engine {
             self.current_state_id = 0;
             return;
         }
+
+        // Snapshot only needed before slow-path mutations (new_composition_in_place).
+        self.push_snapshot();
 
         let mut work = self.work_comp;
         let mut scratch = self.scratch_comp;
@@ -582,6 +638,7 @@ impl Engine {
         self.committed_text.push_str(&word);
         self.active_len = 0;
         self.current_state_id = 0;
+        self.snapshot_len = 0;
     }
 
     /// Returns the currently active syllable as a string.
@@ -675,62 +732,24 @@ impl Engine {
 
     /// Removes the last character from the active composition.
     pub fn remove_last_char(&mut self, refresh_last_tone_target: bool) {
-        let mut work = self.work_comp;
-
-        self.take_active_into(&mut work);
-
-        // Find the last physical keystroke (non-virtual transformation)
-        let last_key_idx = work
-            .as_slice()
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, t)| t.rule.key != '\0')
-            .map(|(i, _)| i);
-
-        let Some(idx) = last_key_idx else {
-            self.set_active_from_stack(&mut work);
-            self.current_state_id = 0;
+        if self.pop_snapshot().is_none() {
             return;
-        };
-
-        let (prev_slice, last_comb_slice) =
-            crate::bamboo_util::extract_last_word(work.as_slice(), Some(&self.input_method.keys));
-
-        let mut previous = TransformationStack::new();
-        previous.extend_from_slice(prev_slice);
-
-        let last_comb = last_comb_slice;
-        let idx_in_last = idx as isize - prev_slice.len() as isize;
-
-        let mut new_word_comp = TransformationStack::new();
-        let mut temp_engine = Self::with_config(self.input_method.clone(), self.config);
-
-        for (i, t) in last_comb.iter().enumerate() {
-            if i as isize == idx_in_last {
-                continue;
-            }
-            if t.rule.key == '\0' {
-                continue;
-            }
-            temp_engine.process_key(t.rule.key, Mode::Vietnamese);
         }
 
-        new_word_comp.extend_from_slice(temp_engine.active_slice());
-
-        if refresh_last_tone_target {
+        if refresh_last_tone_target && self.active_len > 0 {
             let mut extra = TransformationStack::new();
             crate::bamboo_util::refresh_last_tone_target_into(
-                new_word_comp.as_mut_slice(),
+                &mut self.active_buffer[..self.active_len],
                 self.config.to_flags() & crate::bamboo_util::ESTD_TONE_STYLE != 0,
                 &mut extra,
             );
-            new_word_comp.extend_from_slice(extra.as_slice());
+            for t in extra.as_slice() {
+                if self.active_len < MAX_ACTIVE_TRANS {
+                    self.active_buffer[self.active_len] = *t;
+                    self.active_len += 1;
+                }
+            }
         }
-
-        previous.extend_from_slice(new_word_comp.as_slice());
-        self.set_active_from_stack(&mut previous);
-        self.current_state_id = self.dfa.find_state(self.active_slice()).unwrap_or(0);
     }
 
     /// Resets the engine state, clearing committed and active text.
@@ -740,6 +759,7 @@ impl Engine {
         self.prev_preedit.clear();
         self.delta_buf.clear();
         self.current_state_id = 0;
+        self.snapshot_len = 0;
     }
 }
 
