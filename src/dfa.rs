@@ -2,7 +2,7 @@
 
 use crate::engine::Transformation;
 use crate::input_method::InputMethod;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// A DFA state representing a unique syllable composition.
 #[derive(Clone, Debug)]
@@ -25,7 +25,17 @@ impl Default for State {
 pub struct Dfa {
     pub states: Vec<State>,
     pub arena: Vec<Transformation>,
-    pub composition_to_state: HashMap<Box<[Transformation]>, u32>,
+    pub composition_to_state: FxHashMap<Box<[Transformation]>, u32>,
+}
+
+impl Clone for Dfa {
+    fn clone(&self) -> Self {
+        Self {
+            states: self.states.clone(),
+            arena: self.arena.clone(),
+            composition_to_state: self.composition_to_state.clone(),
+        }
+    }
 }
 
 impl Default for Dfa {
@@ -40,7 +50,7 @@ impl Dfa {
         let mut dfa = Self {
             states: Vec::with_capacity(1024),
             arena: Vec::with_capacity(4096),
-            composition_to_state: HashMap::new(),
+            composition_to_state: FxHashMap::default(),
         };
         let empty_comp: Box<[Transformation]> = Box::new([]);
         dfa.states.push(State::default());

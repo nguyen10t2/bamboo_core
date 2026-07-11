@@ -156,6 +156,9 @@ pub struct Engine {
     // Snapshot stack for O(1) backspace — all stack-allocated, zero heap.
     snapshots: [Snapshot; MAX_ACTIVE_TRANS],
     snapshot_len: usize,
+
+    // Lazily-initialized scratch engine for restore_last_word to avoid repeated with_config.
+    scratch_engine: Option<Box<Engine>>,
 }
 
 impl Engine {
@@ -227,6 +230,7 @@ impl Engine {
                 current_state_id: 0,
             }; MAX_ACTIVE_TRANS],
             snapshot_len: 0,
+            scratch_engine: None,
         }
     }
 
@@ -251,7 +255,8 @@ impl Engine {
     fn push_snapshot(&mut self) {
         if self.snapshot_len < MAX_ACTIVE_TRANS {
             let snap = &mut self.snapshots[self.snapshot_len];
-            snap.active_buffer[..self.active_len].copy_from_slice(&self.active_buffer[..self.active_len]);
+            snap.active_buffer[..self.active_len]
+                .copy_from_slice(&self.active_buffer[..self.active_len]);
             snap.active_len = self.active_len;
             snap.current_state_id = self.current_state_id;
             self.snapshot_len += 1;
@@ -266,7 +271,8 @@ impl Engine {
         self.snapshot_len -= 1;
         let snap = &self.snapshots[self.snapshot_len];
         self.active_len = snap.active_len;
-        self.active_buffer[..self.active_len].copy_from_slice(&snap.active_buffer[..self.active_len]);
+        self.active_buffer[..self.active_len]
+            .copy_from_slice(&snap.active_buffer[..self.active_len]);
         self.current_state_id = snap.current_state_id;
         Some(())
     }
@@ -749,7 +755,12 @@ impl Engine {
         }
 
         let mut new_comp = TransformationStack::new();
-        let mut temp_engine = Self::with_config(self.input_method.clone(), self.config);
+        if self.scratch_engine.is_none() {
+            self.scratch_engine =
+                Some(Box::new(Self::with_config(self.input_method.clone(), self.config)));
+        }
+        let temp_engine = self.scratch_engine.as_mut().unwrap();
+        temp_engine.reset();
 
         for t in last {
             if t.rule.key == '\0' {

@@ -19,7 +19,7 @@ A high-performance Vietnamese input method engine (IME) core written in Rust, po
 
 ```toml
 [dependencies]
-bamboo-core = "0.3.11"
+bamboo-core = "0.3.12"
 ```
 
 ## Quick Start
@@ -119,30 +119,30 @@ Benchmarked against [uvie](https://github.com/thuupx/uvie-rs) v2.1.1 on the same
 
 | Benchmark | Bamboo | Uvie | Speedup |
 |---|---:|---:|---:|
-| feed single word (tieengs) | 76 ns | 874 ns | **11.5x** |
-| feed + delta (per key) | 718 ns | 861 ns | **1.2x** |
-| mixed typing (29 chars) | 904 ns | 3,658 ns | **4.0x** |
-| many words (13 words) | 6,745 ns | 11,878 ns | **1.8x** |
+| feed single word (tieengs) | 73 ns | 782 ns | **10.7x** |
+| feed + delta (per key) | 706 ns | 787 ns | **1.1x** |
+| mixed typing (29 chars) | 758 ns | 3,293 ns | **4.3x** |
+| many words (13 words) | 5,871 ns | 10,530 ns | **1.8x** |
 
 ### Backspace
 
 | Benchmark | Bamboo | Uvie | Speedup |
 |---|---:|---:|---:|
-| backspace (1x) | 143 ns | 1,066 ns | **7.5x** |
-| backspace x3 | 262 ns | 1,372 ns | **5.2x** |
-| backspace spam (7x) | 405 ns | 1,704 ns | **4.2x** |
+| backspace (1x) | 144 ns | 953 ns | **6.6x** |
+| backspace x3 | 275 ns | 1,204 ns | **4.4x** |
+| backspace spam (7x) | 425 ns | 1,459 ns | **3.4x** |
 
 ### Real-world Scenarios
 
 | Benchmark | Bamboo | Uvie | Speedup |
 |---|---:|---:|---:|
-| english passthrough (code) | 348 ns | 1,506 ns | **4.3x** |
-| long identifier (39 chars) | 566 ns | 10,467 ns | **18.5x** |
-| commit via space | 167 ns | 868 ns | **5.2x** |
-| worst-case syllable (nghieengs) | 98 ns | 990 ns | **10.1x** |
-| random typing (real workload) | 3,892 ns | 8,488 ns | **2.2x** |
+| english passthrough (code) | 351 ns | 1,289 ns | **3.7x** |
+| long identifier (39 chars) | 557 ns | 9,528 ns | **17.1x** |
+| commit via space | 131 ns | 712 ns | **5.4x** |
+| worst-case syllable (nghieengs) | 98 ns | 904 ns | **9.2x** |
+| random typing (real workload) | 3,202 ns | 7,129 ns | **2.2x** |
 
-> **Note**: Bamboo's cold start (first keystroke) is slower (~19 µs vs ~1.5 µs) due to Engine + DFA allocation. After warmup, the DFA fast path dominates.
+> **Note**: Bamboo's cold start (first keystroke) is slower (~17 µs vs ~1.5 µs) due to Engine + DFA allocation. After warmup, the DFA fast path dominates.
 
 Run benchmarks: `cargo bench`
 
