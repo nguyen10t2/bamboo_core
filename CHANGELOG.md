@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.12] - 2026-07-12
+
+### Performance
+- **FxHashMap for DFA state lookup:** Replaced `std::collections::HashMap` with `rustc_hash::FxHashMap` for the DFA composition-to-state map. FxHash is significantly faster than SipHash for the short `Box<[Transformation]>` keys used in JIT path. Benchmark improvements: DFA miss path -13%, mixed typing -15%, random typing -18%, commit via space -22%.
+- **Scratch engine reuse in `restore_last_word`:** Added a lazily-initialized `scratch_engine` field to avoid creating a new `Engine::with_config` (~19 µs) on every `restore_last_word` call.
+
+### Internal
+- `Dfa` now implements `Clone`.
+- Code formatting aligned with `rustfmt`.
+
 ## [0.3.11] - 2026-07-09
 
 ### Docs

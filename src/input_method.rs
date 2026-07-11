@@ -260,7 +260,7 @@ pub(crate) fn parse_toneless_rules(key: char, line: &str) -> Vec<Rule> {
 
     if let Some((effective_ons, results, rest)) = parse_dsl(&lower) {
         let mut rules = Vec::new();
-        for (effective_on, result) in effective_ons.into_iter().zip(results.into_iter()) {
+        for (effective_on, result) in effective_ons.into_iter().zip(results) {
             let Some(effect) = find_mark_from_char(result) else {
                 continue;
             };
