@@ -285,6 +285,8 @@ pub extern "C" fn bamboo_engine_new(method: i32) -> *mut BambooEngine {
 ///     * 0x04: auto-correct
 ///     * 0x08: `w` becomes `ư` except at the start of a syllable
 ///     * 0x10: `w` always becomes `ư` (wins over 0x08)
+///     * 0x20: `[ ] { }` type `ơ ư Ơ Ư` except at the start of a word
+///     * 0x40: `[ ] { }` always type `ơ ư Ơ Ư` (wins over 0x20)
 ///
 ///   [`bamboo_engine_new`] uses `0x07`.
 ///
@@ -483,13 +485,13 @@ mod tests {
 
     #[test]
     fn test_ffi_engine_new_with_flags() {
-        let typed = |flags: u32| {
+        let typed = |flags: u32, keys: &str| {
             let engine = bamboo_engine_new_with_flags(0, flags);
             assert!(!engine.is_null());
             let mut last = String::new();
             // SAFETY: `engine` is non-null and freed once below.
             unsafe {
-                for ch in "nhw".chars() {
+                for ch in keys.chars() {
                     let res_ptr = bamboo_engine_process(engine, ch as u32);
                     last = CStr::from_ptr(res_ptr).to_string_lossy().into_owned();
                     bamboo_free_string(res_ptr);
@@ -498,8 +500,11 @@ mod tests {
             }
             last
         };
-        assert_eq!(typed(0x07), "nhw");
-        assert_eq!(typed(0x07 | 0x08), "như");
+        assert_eq!(typed(0x07, "nhw"), "nhw");
+        assert_eq!(typed(0x07 | 0x08, "nhw"), "như");
+        // A bracket the engine does not process ends the word.
+        assert_eq!(typed(0x07, "m[f"), "f");
+        assert_eq!(typed(0x07 | 0x20, "m[f"), "mờ");
     }
 
     #[test]

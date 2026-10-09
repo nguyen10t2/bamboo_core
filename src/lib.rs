@@ -162,7 +162,7 @@ pub mod parallel {
     }
 }
 
-pub use config::{Config, ConfigBuilder, W2uMode};
+pub use config::{BracketMode, Config, ConfigBuilder, W2uMode};
 pub(crate) use encoder::tables as charset_def;
 pub use encoder::{Charset, encode_charset};
 pub use engine::{Engine, EngineRules, RestoreMark, Transformation, TransformationStack};

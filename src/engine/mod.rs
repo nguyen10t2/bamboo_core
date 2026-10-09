@@ -308,6 +308,30 @@ impl Engine {
         }
     }
 
+    /// Returns true if `key` takes part in Vietnamese composition at this point, as
+    /// opposed to being typed as is (and ending the word, for punctuation).
+    pub fn can_process_key(&self, key: char) -> bool {
+        let lower_key = lower(key);
+        self.can_process_key_raw(lower_key)
+            || self.bracket_vowel(lower_key, self.active_len == 0).is_some()
+    }
+
+    /// The vowel a bracket key types under [`crate::BracketMode`], if it applies here.
+    fn bracket_vowel(&self, lower_key: char, at_word_start: bool) -> Option<char> {
+        let vowel = match lower_key {
+            '[' | '{' => 'ơ',
+            ']' | '}' => 'ư',
+            _ => return None,
+        };
+        let enabled = match self.config.bracket_mode {
+            crate::BracketMode::Disabled => false,
+            crate::BracketMode::NonStart => !at_word_start,
+            crate::BracketMode::Everywhere => true,
+        };
+        // Input methods with their own bracket rules (Telex 2) keep them.
+        (enabled && !self.is_input_method_key(lower_key)).then_some(vowel)
+    }
+
     fn is_input_method_key(&self, lower_key: char) -> bool {
         (lower_key.is_ascii() && self.rules.ascii_effect_keys[lower_key as usize])
             || self.rules.non_ascii_effect_keys.binary_search(&lower_key).is_ok()
@@ -342,6 +366,27 @@ impl Engine {
             &mut trans_buf,
         );
 
+        // `syllable` is empty only at the start of a word.
+        let bracket = self.bracket_vowel(lower_key, composition.is_empty());
+        if let Some(vowel) = bracket
+            && trans_buf.is_empty()
+            && let Some(last) = composition.as_slice().last()
+            && last.effect_type == EffectType::Appending
+            && matches!(last.key, '[' | ']' | '{' | '}')
+            && last.result == vowel
+        {
+            // `[{` undoes like `[[`; the generic undo only matches the same key.
+            trans_buf.push(Transformation::new(
+                '\0',
+                '\0',
+                '\0',
+                Some((composition.len() - 1) as u8),
+                Mark::Raw as u8,
+                EffectType::MarkTransformation,
+                false,
+            ));
+        }
+
         if trans_buf.is_empty() {
             crate::syllable::generate_fallback_transformations(
                 rules,
@@ -349,6 +394,12 @@ impl Engine {
                 is_upper_case,
                 &mut trans_buf,
             );
+            if let Some(vowel) = bracket
+                && let Some(first) = trans_buf.as_mut_slice().first_mut()
+            {
+                first.result = vowel;
+                first.effect_on = vowel;
+            }
             if lower_key == 'w'
                 && self.w2u_applies(composition.as_slice())
                 && let Some(first) = trans_buf.as_mut_slice().first_mut()
@@ -629,6 +680,10 @@ impl Engine {
             return;
         }
 
+        let bracket = self.bracket_vowel(lower_key, self.active_len == 0);
+        // `{` and `}` are the shifted brackets, so they type capitals.
+        let is_upper_case = is_upper_case || (bracket.is_some() && matches!(lower_key, '{' | '}'));
+
         // DFA Fast Path: if DFA has a cached transition, key is valid.
         // Skip can_process_key_raw entirely.
         // Uses lowercase key for DFA lookup — uppercase shares the same DFA cache.
@@ -673,7 +728,7 @@ impl Engine {
         }
 
         // Slow path: validate key and handle word breaks
-        if !self.can_process_key_raw(lower_key) {
+        if bracket.is_none() && !self.can_process_key_raw(lower_key) {
             if crate::phonetics::is_word_break_symbol(lower_key) {
                 self.commit();
             }

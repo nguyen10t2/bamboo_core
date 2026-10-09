@@ -19,6 +19,21 @@ pub enum W2uMode {
     Everywhere,
 }
 
+/// When `[`, `]`, `{` and `}` type `ơ`, `ư`, `Ơ` and `Ư`.
+///
+/// Typing the same bracket again gives the bracket back (`[[` -> `[`). Input methods that
+/// already map a bracket (Telex 2) are unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum BracketMode {
+    /// Brackets stay brackets.
+    #[default]
+    Disabled,
+    /// Brackets type vowels except at the start of a word (`t[` -> `tơ`, `[` -> `[`).
+    NonStart,
+    /// Brackets always type vowels (`[` -> `ơ`).
+    Everywhere,
+}
+
 /// Configuration options for the Bamboo engine.
 ///
 /// Use [`Config::default()`] for the standard modern Vietnamese input setup,
@@ -60,6 +75,10 @@ pub struct Config {
     ///
     /// Default: [`W2uMode::Disabled`].
     pub w2u_mode: W2uMode,
+    /// When brackets type `ơ` and `ư`; see [`BracketMode`].
+    ///
+    /// Default: [`BracketMode::Disabled`].
+    pub bracket_mode: BracketMode,
 }
 
 impl Default for Config {
@@ -69,6 +88,7 @@ impl Default for Config {
             std_tone_style: true,
             auto_correct: true,
             w2u_mode: W2uMode::Disabled,
+            bracket_mode: BracketMode::Disabled,
         }
     }
 }
@@ -81,6 +101,7 @@ impl Config {
             std_tone_style: true,
             auto_correct: true,
             w2u_mode: W2uMode::Disabled,
+            bracket_mode: BracketMode::Disabled,
         }
     }
 
@@ -96,6 +117,8 @@ impl Config {
     /// - Bit 2 (0x04): `auto_correct`
     /// - Bit 3 (0x08): `w2u_mode` is [`W2uMode::NonStart`]
     /// - Bit 4 (0x10): `w2u_mode` is [`W2uMode::Everywhere`] (wins over bit 3)
+    /// - Bit 5 (0x20): `bracket_mode` is [`BracketMode::NonStart`]
+    /// - Bit 6 (0x40): `bracket_mode` is [`BracketMode::Everywhere`] (wins over bit 5)
     pub const fn to_flags(self) -> u32 {
         let mut flags = 0;
         if self.free_tone_marking {
@@ -112,6 +135,11 @@ impl Config {
             W2uMode::NonStart => flags |= 1 << 3,
             W2uMode::Everywhere => flags |= 1 << 4,
         }
+        match self.bracket_mode {
+            BracketMode::Disabled => {}
+            BracketMode::NonStart => flags |= 1 << 5,
+            BracketMode::Everywhere => flags |= 1 << 6,
+        }
         flags
     }
 
@@ -122,6 +150,8 @@ impl Config {
     /// - Bit 2 (0x04): `auto_correct`
     /// - Bit 3 (0x08): `w2u_mode` is [`W2uMode::NonStart`]
     /// - Bit 4 (0x10): `w2u_mode` is [`W2uMode::Everywhere`] (wins over bit 3)
+    /// - Bit 5 (0x20): `bracket_mode` is [`BracketMode::NonStart`]
+    /// - Bit 6 (0x40): `bracket_mode` is [`BracketMode::Everywhere`] (wins over bit 5)
     pub const fn from_flags(flags: u32) -> Self {
         Self {
             free_tone_marking: (flags & (1 << 0)) != 0,
@@ -133,6 +163,13 @@ impl Config {
                 W2uMode::NonStart
             } else {
                 W2uMode::Disabled
+            },
+            bracket_mode: if flags & (1 << 6) != 0 {
+                BracketMode::Everywhere
+            } else if flags & (1 << 5) != 0 {
+                BracketMode::NonStart
+            } else {
+                BracketMode::Disabled
             },
         }
     }
@@ -174,6 +211,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets when brackets type `ơ` and `ư`.
+    pub const fn bracket_mode(mut self, mode: BracketMode) -> Self {
+        self.config.bracket_mode = mode;
+        self
+    }
+
     /// Builds and returns the final [`Config`].
     pub const fn build(self) -> Config {
         self.config
@@ -187,14 +230,15 @@ mod tests {
     #[test]
     fn to_flags_from_flags_roundtrip() {
         let configs = [
-            (true, true, true, W2uMode::Disabled),
-            (false, false, false, W2uMode::NonStart),
-            (true, false, true, W2uMode::Everywhere),
-            (false, true, false, W2uMode::Disabled),
-            (true, false, false, W2uMode::NonStart),
+            (true, true, true, W2uMode::Disabled, BracketMode::Disabled),
+            (false, false, false, W2uMode::NonStart, BracketMode::NonStart),
+            (true, false, true, W2uMode::Everywhere, BracketMode::Everywhere),
+            (false, true, false, W2uMode::Disabled, BracketMode::NonStart),
+            (true, false, false, W2uMode::NonStart, BracketMode::Disabled),
         ];
-        for (free_tone_marking, std_tone_style, auto_correct, w2u_mode) in configs {
-            let original = Config { free_tone_marking, std_tone_style, auto_correct, w2u_mode };
+        for (free_tone_marking, std_tone_style, auto_correct, w2u_mode, bracket_mode) in configs {
+            let original =
+                Config { free_tone_marking, std_tone_style, auto_correct, w2u_mode, bracket_mode };
             let flags = original.to_flags();
             let restored = Config::from_flags(flags);
             assert_eq!(original, restored, "Round-trip failed for {original:?}");
@@ -223,6 +267,7 @@ mod tests {
                 std_tone_style: true,
                 auto_correct: false,
                 w2u_mode: W2uMode::Disabled,
+                bracket_mode: BracketMode::Disabled,
             }
         );
     }
