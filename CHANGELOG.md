@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.26] - 2026-10-09
+
 ### Features
 - **Custom Input Methods:** `InputMethod::from_definition` builds an input method from runtime key → rule pairs in the preset format (e.g. `("q", "DauSac")`), like Go bamboo-core's `ParseInputMethod` on a user map.
 - **`w` to `ư`:** `Config::w2u_mode` / `ConfigBuilder::w2u_mode` take a `W2uMode`: `Disabled` (default, unchanged behaviour), `NonStart` (`nhw` → `như`, a syllable-initial `w` stays `w`) or `Everywhere` (`w` → `ư`).
