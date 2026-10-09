@@ -1352,4 +1352,55 @@ mod tests {
         assert_eq!(vo.len(), 1);
         assert_eq!(lc.len(), 0);
     }
+
+    /// The resume hint is a pure fast path: replaying from it must give the
+    /// same syllable start as a full rescan on every keystroke shape
+    /// (valid words, invalid tails, VNI digits, backspace, uppercase).
+    #[test]
+    fn syll_hint_matches_full_rescan() {
+        use crate::engine::Engine;
+        use crate::input_method::InputMethod;
+        use crate::mode::Mode;
+
+        const SEQS: &[&str] = &[
+            "tieengs",
+            "nguwowif",
+            "dduwowngf",
+            "khuyeens",
+            "nghieengs",
+            "truwowngf",
+            "thuyeens",
+            "mymfyk",
+            "craxyuk",
+            "enlf",
+            "hoafn",
+            "xre6po6c",
+            "go366",
+            "eete",
+            "uwfw",
+            "tieengsBB",
+            "eeteBe",
+            "ing3",
+            "TIEENGS",
+            "VieetjNam",
+        ];
+        for seq in SEQS {
+            for im in [InputMethod::telex(), InputMethod::vni()] {
+                let mut engine = Engine::new(im);
+                let mut hint = SyllHint::NONE;
+                for k in seq.chars() {
+                    if k == 'B' {
+                        engine.remove_last_output_char();
+                    } else {
+                        engine.process_key(k, Mode::Vietnamese);
+                    }
+                    let comp = engine.active_slice();
+                    let (resumed, next) = last_syllable_start(comp, hint);
+                    let (fresh, _) = last_syllable_start(comp, SyllHint::NONE);
+                    assert_eq!(resumed, fresh, "hint diverged on {seq}");
+                    hint = next;
+                }
+            }
+        }
+    }
 }

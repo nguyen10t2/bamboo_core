@@ -70,6 +70,10 @@ fn test_vi_crate_simple_telex_sentences() {
     assert_eq!(type_phrase(&mut e, "vijete nam"), "việt nam");
     assert_eq!(type_phrase(&mut e, "gifang owi"), "giàng ơi");
     assert_eq!(type_phrase(&mut e, "Gifang owi"), "Giàng ơi");
+    // Deliberately not `ươ` (skey/vi): `uow` is the mechanical Telex step to
+    // `uơ`, matching Go/uvie and the documented `uow | truowng | trương`
+    // mapping. See `telex_horn_on_o_when_nothing_follows_uo` for why the
+    // dictionary does not overrule preedit mechanics here.
     assert_eq!(type_phrase(&mut e, "uow"), "uơ");
     assert_eq!(type_phrase(&mut e, "uwo"), "ưo");
     assert_eq!(type_phrase(&mut e, "uwon"), "ươn");

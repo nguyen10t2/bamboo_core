@@ -10,6 +10,12 @@ fn check(im: InputMethod, cases: &[(&str, &str)]) {
 
 #[test]
 fn telex_horn_on_o_when_nothing_follows_uo() {
+    // `uow` types the documented Telex diphthong step `uơ` (as in `truowng`
+    // -> `trương`): the horn lands on the nearest vowel `o`, and a following
+    // coda still resolves it (`uowng` -> `ương`). A mid-word preedit is not
+    // judged by dictionary rimes (`uơ` is no standalone word, but neither is
+    // any other unfinished preedit); what matters is that completed words
+    // come out right (`truowcs` -> `trước`, see the vi/uvie suite).
     check(InputMethod::telex(), &[("khuow", "khuơ"), ("uowr", "uở")]);
 }
 
