@@ -139,11 +139,15 @@ pub mod parallel {
 
     /// Processes multiple input strings in parallel using Rayon work-stealing.
     ///
+    /// One engine is reused per worker thread (reset between items), so
+    /// per-item construction cost is paid once per thread and later items
+    /// reuse the warmed JIT cache. Output order matches input order.
+    ///
     /// # Example
     /// ```rust
     /// use bamboo_core::{parallel::process_batch, Mode, InputMethod};
     ///
-    /// let inputs = vec!["tieengs", "vietj", "nam"];
+    /// let inputs = vec!["tieengs", "vieetj", "nam"];
     /// let results = process_batch(&inputs, &InputMethod::telex(), Mode::Vietnamese);
     /// assert_eq!(results, vec!["tiếng", "việt", "nam"]);
     /// ```
@@ -154,10 +158,13 @@ pub mod parallel {
     ) -> Vec<String> {
         inputs
             .par_iter()
-            .map(|s| {
-                let mut engine = Engine::new(input_method.clone());
-                engine.process(s.as_ref(), mode)
-            })
+            .map_init(
+                || Engine::new(input_method.clone()),
+                |engine, s| {
+                    engine.reset();
+                    engine.process(s.as_ref(), mode)
+                },
+            )
             .collect()
     }
 }

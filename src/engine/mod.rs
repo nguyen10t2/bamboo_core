@@ -33,6 +33,11 @@ pub struct Engine {
     /// Cached preedit string of the active composition for zero-allocation [`output()`](Self::output).
     cached_output: String,
     active_len: usize,
+    /// Bit `i` = `active_buffer[i].is_upper_case`, maintained incrementally so
+    /// the DFA-hit path and snapshots need no per-key fold. Invariant is
+    /// checked by a `debug_assert` in [`Engine::update_cached_output`], which
+    /// runs on every keystroke in test builds.
+    active_upper_mask: u16,
     /// Snapshot stack for O(1) backspace — 8-byte metadata per slot, zero heap.
     snapshots: [Snapshot; MAX_ACTIVE_TRANS],
     snapshot_len: usize,
@@ -110,6 +115,7 @@ impl Engine {
             cached_output: String::with_capacity(32),
             active_buffer: [Transformation::default(); MAX_ACTIVE_TRANS],
             active_len: 0,
+            active_upper_mask: 0,
             input_method,
             rules,
             config,
@@ -138,10 +144,21 @@ impl Engine {
         out.clear();
         out.extend_from_slice(self.active_slice());
         self.active_len = 0;
+        self.active_upper_mask = 0;
     }
 
     #[inline]
     fn update_cached_output(&mut self) {
+        // The incremental mask must mirror the buffer on every keystroke;
+        // this fires in test/debug builds if any mutation site forgets it.
+        debug_assert_eq!(
+            self.active_upper_mask,
+            self.active_slice()
+                .iter()
+                .enumerate()
+                .fold(0u16, |m, (i, t)| { if t.is_upper_case { m | (1u16 << i) } else { m } }),
+            "active_upper_mask out of sync with active_buffer"
+        );
         self.cached_output.clear();
         if self.active_len == 0 {
             return;
@@ -175,6 +192,12 @@ impl Engine {
         self.active_len = src.len().min(MAX_ACTIVE_TRANS);
         self.active_buffer[..self.active_len].copy_from_slice(src.as_slice());
         src.clear();
+        // Cold paths only (slow key / restore / rebuild): recompute directly.
+        self.active_upper_mask = self
+            .active_slice()
+            .iter()
+            .enumerate()
+            .fold(0u16, |m, (i, t)| if t.is_upper_case { m | (1u16 << i) } else { m });
     }
 
     #[inline]
@@ -184,9 +207,8 @@ impl Engine {
             let snap = &mut self.snapshots[self.snapshot_len];
             snap.state_id = self.current_state_id;
             snap.active_len = self.active_len as u8;
-            snap.upper_mask = (0..self.active_len).fold(0u16, |m, i| {
-                if self.active_buffer[i].is_upper_case { m | (1u16 << i) } else { m }
-            });
+            // Pre-key mask, maintained incrementally (no per-key fold).
+            snap.upper_mask = self.active_upper_mask;
             snap.flags = if self.english_bypass { FLAG_ENGLISH_BYPASS } else { 0 }
                 | if needs_buffer { FLAG_NEEDS_BUFFER } else { 0 };
             if needs_buffer {
@@ -234,6 +256,11 @@ impl Engine {
         } else {
             self.active_len = snap.active_len as usize;
         }
+        self.active_upper_mask = self
+            .active_slice()
+            .iter()
+            .enumerate()
+            .fold(0u16, |m, (i, t)| if t.is_upper_case { m | (1u16 << i) } else { m });
         Some(())
     }
 
@@ -762,6 +789,9 @@ impl Engine {
         if mode != Mode::English && self.active_len > 0 {
             self.push_snapshot();
         }
+        if is_upper_case {
+            self.active_upper_mask |= 1u16 << self.active_len;
+        }
         self.active_buffer[self.active_len] =
             crate::syllable::new_appending_trans(lower_key, is_upper_case);
         self.active_len += 1;
@@ -796,11 +826,8 @@ impl Engine {
         }
         self.push_snapshot();
         let prev_len = self.active_len;
-        // Pack case bits into a u16 mask: bit i = active_buffer[i].is_upper_case.
-        // Single load + single compare for the common all-lowercase case.
-        let prev_upper: u16 = (0..prev_len).fold(0u16, |m, i| {
-            if self.active_buffer[i].is_upper_case { m | (1u16 << i) } else { m }
-        });
+        // Pre-key mask, maintained incrementally (no per-key fold).
+        let prev_upper = self.active_upper_mask;
 
         self.current_state_id = next_state_id;
         let comp = self.dfa.get_composition(next_state_id);
@@ -812,11 +839,18 @@ impl Engine {
                 self.active_buffer[i].is_upper_case = (prev_upper >> i) & 1 != 0;
             }
         }
+        // Maintain the mask with bit ops: keep shared prefix bits, set the
+        // new tail when the fresh key is uppercase.
+        let shared = prev_len.min(self.active_len);
+        let keep = if shared >= 16 { u16::MAX } else { (1u16 << shared) - 1 };
+        let mut new_mask = prev_upper & keep;
         if is_upper_case && prev_len <= self.active_len {
-            for t in &mut self.active_buffer[prev_len..self.active_len] {
+            for (k, t) in self.active_buffer[prev_len..self.active_len].iter_mut().enumerate() {
                 t.is_upper_case = true;
+                new_mask |= 1u16 << (prev_len + k);
             }
         }
+        self.active_upper_mask = new_mask;
         true
     }
 
@@ -922,6 +956,9 @@ impl Engine {
             // Buffer full, auto-commit to make room
             self.commit();
         }
+        if trans.is_upper_case {
+            self.active_upper_mask |= 1u16 << self.active_len;
+        }
         self.active_buffer[self.active_len] = trans;
         self.active_len += 1;
         self.current_state_id = self.dfa.find_state(self.active_slice()).unwrap_or(0);
@@ -943,6 +980,7 @@ impl Engine {
         );
         self.cached_output.clear();
         self.active_len = 0;
+        self.active_upper_mask = 0;
         self.current_state_id = 0;
         self.snapshot_len = 0;
         self.english_bypass = false;
@@ -1129,6 +1167,12 @@ impl Engine {
         if self.english_bypass && self.is_valid(false) {
             self.english_bypass = false;
         }
+        // Compaction shifts case bits: recompute directly (cold path).
+        self.active_upper_mask = self
+            .active_slice()
+            .iter()
+            .enumerate()
+            .fold(0u16, |m, (i, t)| if t.is_upper_case { m | (1u16 << i) } else { m });
         self.update_cached_output();
     }
 
@@ -1138,6 +1182,7 @@ impl Engine {
         self.committed_raw.clear();
         self.cached_output.clear();
         self.active_len = 0;
+        self.active_upper_mask = 0;
         self.prev_preedit.clear();
         self.delta_buf.clear();
         self.current_state_id = 0;

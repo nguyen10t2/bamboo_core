@@ -228,11 +228,16 @@ pub(crate) fn hash_composition(composition: &[Transformation]) -> u64 {
 
 impl Dfa {
     /// Creates a new DFA with an initial empty state (state ID 0).
+    ///
+    /// Arenas start unallocated and grow on demand: a fresh `Engine` costs no
+    /// ~20 KiB upfront, which matters for short-lived engines (batch items,
+    /// FFI create/use/free, tests). Long sessions amortize the growth
+    /// reallocations during warmup.
     pub fn new() -> Self {
         let mut dfa = Self {
-            states: Vec::with_capacity(128),
-            arena: Vec::with_capacity(512),
-            flat_arena: Vec::with_capacity(1024),
+            states: Vec::new(),
+            arena: Vec::new(),
+            flat_arena: Vec::new(),
             hash_to_state: FxHashMap::default(),
         };
         dfa.states.push(State::default());
