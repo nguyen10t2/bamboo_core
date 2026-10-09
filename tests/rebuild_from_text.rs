@@ -215,4 +215,13 @@ fn word_too_long_for_composition_stays_text() {
     e.rebuild_from_text(text);
     assert_eq!(full_text(&e), text);
     assert_eq!(e.output(), "");
+    assert_eq!(e.get_processed_str(OutputOptions::RAW | OutputOptions::FULL_TEXT), text);
+}
+
+#[test]
+fn rebuild_keeps_raw_keys_of_committed_words() {
+    let mut e = engine(InputMethod::telex());
+    e.rebuild_from_text("xin tiếng");
+    // Go keeps a toned ê whole, so its key is ê, not e.
+    assert_eq!(e.get_processed_str(OutputOptions::RAW | OutputOptions::FULL_TEXT), "xin tiêng");
 }
