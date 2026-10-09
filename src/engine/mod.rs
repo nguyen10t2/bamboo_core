@@ -363,6 +363,8 @@ impl Engine {
 
         // `syllable` is empty only at the start of a word.
         let bracket = self.bracket_vowel(lower_key, composition.is_empty());
+        // Stack-bounded: indices below truncate into `u8` targets.
+        debug_assert!(composition.len() <= MAX_ACTIVE_TRANS);
         if let Some(vowel) = bracket
             && trans_buf.is_empty()
             && let Some(last) = composition.as_slice().last()
@@ -407,24 +409,7 @@ impl Engine {
 
         // Any key, not only a letter, can complete "uơ"/"ưo" + letter (e.g. a
         // horn on "luộc"), so the second horn is checked after every key.
-        let combined_len = composition.len() + trans_buf.len();
-        if combined_len <= MAX_ACTIVE_TRANS && !self.input_method.super_keys.is_empty() {
-            let mut tmp_data = [Transformation::default(); MAX_ACTIVE_TRANS];
-            tmp_data[..composition.len()].copy_from_slice(composition.as_slice());
-            tmp_data[composition.len()..combined_len].copy_from_slice(trans_buf.as_slice());
-
-            if crate::syllable::uho_tail_match_composition(&tmp_data[..combined_len]) {
-                let (target, rule) = crate::syllable::find_target(
-                    &tmp_data[..combined_len],
-                    self.get_applicable_rules(self.input_method.super_keys[0]),
-                    self.config,
-                );
-                if let (Some(target), Some(mut rule)) = (target, rule) {
-                    rule.key = '\0';
-                    trans_buf.push(Transformation::from_rule(rule, Some(target), false));
-                }
-            }
-        }
+        self.maybe_apply_uho_horn(composition, &mut trans_buf);
 
         let has_undo = trans_buf.as_slice().iter().any(|t| {
             t.has_target()
@@ -449,6 +434,35 @@ impl Engine {
         has_undo
     }
 
+    /// Spreads a horn mark across a `uơ`/`ưo` + letter tail when the input
+    /// method defines super keys (Telex `w`). Runs after every key because a
+    /// mark key can complete the pattern, not just a letter.
+    fn maybe_apply_uho_horn(
+        &self,
+        composition: &TransformationStack,
+        trans_buf: &mut TransformationStack,
+    ) {
+        let combined_len = composition.len() + trans_buf.len();
+        if combined_len > MAX_ACTIVE_TRANS || self.input_method.super_keys.is_empty() {
+            return;
+        }
+        let mut tmp_data = [Transformation::default(); MAX_ACTIVE_TRANS];
+        tmp_data[..composition.len()].copy_from_slice(composition.as_slice());
+        tmp_data[composition.len()..combined_len].copy_from_slice(trans_buf.as_slice());
+
+        if crate::syllable::uho_tail_match_composition(&tmp_data[..combined_len]) {
+            let (target, rule) = crate::syllable::find_target(
+                &tmp_data[..combined_len],
+                self.get_applicable_rules(self.input_method.super_keys[0]),
+                self.config,
+            );
+            if let (Some(target), Some(mut rule)) = (target, rule) {
+                rule.key = '\0';
+                trans_buf.push(Transformation::from_rule(rule, Some(target), false));
+            }
+        }
+    }
+
     // `syllable` is the composition before the key, so empty means the key starts a syllable.
     const fn w2u_applies(&self, syllable: &[Transformation]) -> bool {
         match self.config.w2u_mode {
@@ -465,6 +479,8 @@ impl Engine {
         key: char,
         is_upper_case: bool,
     ) -> bool {
+        // Stack-bounded: target indices below truncate into `u8`.
+        debug_assert!(composition.len() <= MAX_ACTIVE_TRANS);
         let (syllable_abs_start, hint) =
             crate::syllable::last_syllable_start(composition.as_slice(), self.syll_hint);
         self.syll_hint = hint;
@@ -661,26 +677,7 @@ impl Engine {
         // English mode or English bypass active: skip all Vietnamese processing.
         // Direct buffer append — no DFA lookup, snapshot saved for backspace.
         if mode == Mode::English || self.english_bypass {
-            // VNI tone keys are digits: they belong to the word, so restore,
-            // raw output and backspace must still reach them.
-            let ends_word = crate::phonetics::is_word_break_symbol(lower_key)
-                && !self.is_input_method_key(lower_key);
-            if ends_word && self.active_len > 0 {
-                self.commit();
-            }
-            if self.active_len >= MAX_ACTIVE_TRANS {
-                self.commit();
-            }
-            if mode != Mode::English && self.active_len > 0 {
-                self.push_snapshot();
-            }
-            self.active_buffer[self.active_len] =
-                crate::syllable::new_appending_trans(lower_key, is_upper_case);
-            self.active_len += 1;
-            if ends_word {
-                self.commit();
-            }
-            self.current_state_id = 0;
+            self.push_english_append(lower_key, is_upper_case, mode);
             return;
         }
 
@@ -688,64 +685,14 @@ impl Engine {
         // `{` and `}` are the shifted brackets, so they type capitals.
         let is_upper_case = is_upper_case || (bracket.is_some() && matches!(lower_key, '{' | '}'));
 
-        // DFA Fast Path: if DFA has a cached transition, key is valid.
-        // Skip can_process_key_raw entirely.
-        // Uses lowercase key for DFA lookup — uppercase shares the same DFA cache.
-        // Structural guard: state 0 only identifies empty active text. With
-        // non-empty residue (frozen/refused composition, digit residue from
-        // `push_active`, non-ASCII/English residue) a lookup from state 0
-        // could false-hit a word-start edge and wipe the composition, so those
-        // keys take the slow path. Skipped while detached (perf: the frozen
-        // DFA would miss anyway).
-        if !self.dfa_detached
-            && lower_key.is_ascii()
-            && (self.active_len == 0 || self.current_state_id != 0)
-        {
-            let next_state_id =
-                self.dfa.get_state(self.current_state_id).get_transition(lower_key as u8);
-            if next_state_id != 0 {
-                self.push_snapshot();
-                let prev_len = self.active_len;
-                // Pack case bits into a u16 mask: bit i = active_buffer[i].is_upper_case.
-                // Single load + single compare for the common all-lowercase case.
-                let prev_upper: u16 = (0..prev_len).fold(0u16, |m, i| {
-                    if self.active_buffer[i].is_upper_case { m | (1u16 << i) } else { m }
-                });
-
-                self.current_state_id = next_state_id;
-                let comp = self.dfa.get_composition(next_state_id);
-                self.active_len = comp.len().min(MAX_ACTIVE_TRANS);
-                self.active_buffer[..self.active_len].copy_from_slice(comp);
-
-                if prev_upper != 0 {
-                    for i in 0..prev_len.min(self.active_len) {
-                        self.active_buffer[i].is_upper_case = (prev_upper >> i) & 1 != 0;
-                    }
-                }
-                if is_upper_case && prev_len <= self.active_len {
-                    for t in &mut self.active_buffer[prev_len..self.active_len] {
-                        t.is_upper_case = true;
-                    }
-                }
-                return;
-            }
+        // DFA fast path: returns true when a cached transition handled the key.
+        if self.try_dfa_hit(lower_key, is_upper_case) {
+            return;
         }
 
         // Slow path: validate key and handle word breaks
         if bracket.is_none() && !self.can_process_key_raw(lower_key) {
-            if crate::phonetics::is_word_break_symbol(lower_key) {
-                self.commit();
-            }
-            // Snapshot before push_active so backspace can restore previous state.
-            // Word breaks trigger commit() which clears snapshots — that's correct
-            // (committed text can't be undone via backspace).
-            self.push_snapshot();
-            let trans = crate::syllable::new_appending_trans(lower_key, is_upper_case);
-            self.push_active(trans);
-            if crate::phonetics::is_word_break_symbol(lower_key) {
-                self.commit();
-            }
-            self.current_state_id = 0;
+            self.handle_word_break_key(lower_key, is_upper_case);
             return;
         }
 
@@ -790,75 +737,184 @@ impl Engine {
         }
 
         // Real-time Auto-restore when auto_correct is enabled:
-        if !has_undo && self.config.auto_correct {
-            let has_transforms = work
-                .as_slice()
-                .iter()
-                .any(|t| t.has_target() || (t.key != '\0' && t.result != t.key));
-
-            if has_transforms && !self.is_valid_internal(work.as_slice(), false) {
-                let raw_comp = crate::syllable::break_composition_slice(work.as_slice());
-                let raw_len =
-                    work.as_slice().iter().filter(|t| t.key != '\0').count().min(MAX_ACTIVE_TRANS);
-                work.clear();
-                work.extend_from_slice(&raw_comp[..raw_len]);
-                self.english_bypass = true;
-            }
-        }
+        self.apply_auto_correct(&mut work, has_undo);
 
         // Try to update DFA (Lazy JIT).
         // Always cache using lowercase key so uppercase keys reuse the same DFA transitions.
         // Skipped while detached: the DFA is frozen, slow path stays correct uncached.
-        if !self.english_bypass
-            && !self.dfa_detached
-            && lower_key.is_ascii()
-            && work.len() <= MAX_ACTIVE_TRANS
+        self.link_jit_state(lower_key, &work, &mut scratch, prefix_known);
+
+        self.set_active_from_stack(&mut work);
+    }
+
+    /// English-mode (or bypassed) key: appends raw, committing on word breaks.
+    fn push_english_append(&mut self, lower_key: char, is_upper_case: bool, mode: Mode) {
+        // VNI tone keys are digits: they belong to the word, so restore,
+        // raw output and backspace must still reach them.
+        let ends_word = crate::phonetics::is_word_break_symbol(lower_key)
+            && !self.is_input_method_key(lower_key);
+        if ends_word && self.active_len > 0 {
+            self.commit();
+        }
+        if self.active_len >= MAX_ACTIVE_TRANS {
+            self.commit();
+        }
+        if mode != Mode::English && self.active_len > 0 {
+            self.push_snapshot();
+        }
+        self.active_buffer[self.active_len] =
+            crate::syllable::new_appending_trans(lower_key, is_upper_case);
+        self.active_len += 1;
+        if ends_word {
+            self.commit();
+        }
+        self.current_state_id = 0;
+    }
+
+    /// DFA fast path: applies a cached transition when one exists.
+    ///
+    /// Uses the lowercase key so uppercase shares the same DFA cache.
+    /// Structural guard: state 0 only identifies empty active text. With
+    /// non-empty residue (frozen/refused composition, digit residue from
+    /// `push_active`, non-ASCII/English residue) a lookup from state 0
+    /// could false-hit a word-start edge and wipe the composition, so those
+    /// keys take the slow path. Skipped while detached (perf: the frozen
+    /// DFA would miss anyway).
+    ///
+    /// Returns true when a cached transition handled the key.
+    fn try_dfa_hit(&mut self, lower_key: char, is_upper_case: bool) -> bool {
+        if self.dfa_detached
+            || !lower_key.is_ascii()
+            || (self.active_len != 0 && self.current_state_id == 0)
         {
-            // For uppercase: create a lowercase copy of the composition for DFA caching.
-            // This ensures both 'a' and 'A' share the same DFA transition from the same state.
-            let cache_comp = if work.as_slice().iter().any(|t| t.is_upper_case) {
-                scratch.clear();
-                scratch.extend_from_slice(work.as_slice());
-                for t in scratch.as_mut_slice() {
-                    t.is_upper_case = false;
-                }
-                scratch.as_slice()
-            } else {
-                work.as_slice()
-            };
-            let next_id = self.dfa.add_state(cache_comp);
-            if next_id != 0 {
-                // Link only on a known prefix; otherwise `current_state_id`
-                // (e.g. state 0 over residue) does not describe the pre-key
-                // composition and the edge would corrupt the trie. The new
-                // state itself still identifies the post-key active text, so
-                // `current_state_id` is always updated.
-                if prefix_known {
-                    self.dfa.states[self.current_state_id as usize]
-                        .set_transition(lower_key as u8, next_id);
-                }
-                self.current_state_id = next_id;
-            } else if self.dfa.is_full() {
-                // DFA frozen: detach so later keys take the slow path instead
-                // of false-hitting word-start edges from state 0. Snapshots
-                // already cover backspace via bypass_buffers (current == 0).
-                self.dfa_detached = true;
-                self.current_state_id = self.dfa.find_state(cache_comp).unwrap_or(0);
-            } else {
-                self.current_state_id = self.dfa.find_state(cache_comp).unwrap_or(0);
+            return false;
+        }
+        let next_state_id =
+            self.dfa.get_state(self.current_state_id).get_transition(lower_key as u8);
+        if next_state_id == 0 {
+            return false;
+        }
+        self.push_snapshot();
+        let prev_len = self.active_len;
+        // Pack case bits into a u16 mask: bit i = active_buffer[i].is_upper_case.
+        // Single load + single compare for the common all-lowercase case.
+        let prev_upper: u16 = (0..prev_len).fold(0u16, |m, i| {
+            if self.active_buffer[i].is_upper_case { m | (1u16 << i) } else { m }
+        });
+
+        self.current_state_id = next_state_id;
+        let comp = self.dfa.get_composition(next_state_id);
+        self.active_len = comp.len().min(MAX_ACTIVE_TRANS);
+        self.active_buffer[..self.active_len].copy_from_slice(comp);
+
+        if prev_upper != 0 {
+            for i in 0..prev_len.min(self.active_len) {
+                self.active_buffer[i].is_upper_case = (prev_upper >> i) & 1 != 0;
             }
-        } else {
+        }
+        if is_upper_case && prev_len <= self.active_len {
+            for t in &mut self.active_buffer[prev_len..self.active_len] {
+                t.is_upper_case = true;
+            }
+        }
+        true
+    }
+
+    /// Non-processable key on the slow path: snapshots, appends raw, and
+    /// commits on word breaks.
+    fn handle_word_break_key(&mut self, lower_key: char, is_upper_case: bool) {
+        if crate::phonetics::is_word_break_symbol(lower_key) {
+            self.commit();
+        }
+        // Snapshot before push_active so backspace can restore previous state.
+        // Word breaks trigger commit() which clears snapshots — that's correct
+        // (committed text can't be undone via backspace).
+        self.push_snapshot();
+        let trans = crate::syllable::new_appending_trans(lower_key, is_upper_case);
+        self.push_active(trans);
+        if crate::phonetics::is_word_break_symbol(lower_key) {
+            self.commit();
+        }
+        self.current_state_id = 0;
+    }
+
+    /// Restores a mistyped word to raw keys when `auto_correct` is on and the
+    /// result is not a valid Vietnamese prefix (no-op otherwise).
+    fn apply_auto_correct(&mut self, work: &mut TransformationStack, has_undo: bool) {
+        if has_undo || !self.config.auto_correct {
+            return;
+        }
+        let has_transforms =
+            work.as_slice().iter().any(|t| t.has_target() || (t.key != '\0' && t.result != t.key));
+
+        if has_transforms && !self.is_valid_internal(work.as_slice(), false) {
+            let raw_comp = crate::syllable::break_composition_slice(work.as_slice());
+            let raw_len =
+                work.as_slice().iter().filter(|t| t.key != '\0').count().min(MAX_ACTIVE_TRANS);
+            work.clear();
+            work.extend_from_slice(&raw_comp[..raw_len]);
+            self.english_bypass = true;
+        }
+    }
+
+    /// Links the post-key composition into the JIT trie (or resolves the
+    /// current state when detached/bypassed), using lowercase-canonical keys
+    /// so `'a'` and `'A'` share transitions.
+    fn link_jit_state(
+        &mut self,
+        lower_key: char,
+        work: &TransformationStack,
+        scratch: &mut TransformationStack,
+        prefix_known: bool,
+    ) {
+        if self.english_bypass
+            || self.dfa_detached
+            || !lower_key.is_ascii()
+            || work.len() > MAX_ACTIVE_TRANS
+        {
             // Canonical (lowercase) lookup: the map stores lowercase-canonical
-            // compositions (see `cache_comp` above), so work carrying uppercase
-            // bits would miss an existing state on a raw `find_state`.
-            let mut lower = work;
+            // compositions, so work carrying uppercase bits would miss an
+            // existing state on a raw `find_state`.
+            let mut lower = *work;
             for t in lower.as_mut_slice() {
                 t.is_upper_case = false;
             }
             self.current_state_id = self.dfa.find_state(lower.as_slice()).unwrap_or(0);
+            return;
         }
-
-        self.set_active_from_stack(&mut work);
+        // For uppercase: create a lowercase copy of the composition for DFA caching.
+        // This ensures both 'a' and 'A' share the same DFA transition from the same state.
+        let cache_comp = if work.as_slice().iter().any(|t| t.is_upper_case) {
+            scratch.clear();
+            scratch.extend_from_slice(work.as_slice());
+            for t in scratch.as_mut_slice() {
+                t.is_upper_case = false;
+            }
+            scratch.as_slice()
+        } else {
+            work.as_slice()
+        };
+        let next_id = self.dfa.add_state(cache_comp);
+        if next_id != 0 {
+            // Link only on a known prefix; otherwise `current_state_id`
+            // (e.g. state 0 over residue) does not describe the pre-key
+            // composition and the edge would corrupt the trie. The new
+            // state itself still identifies the post-key active text, so
+            // `current_state_id` is always updated.
+            if prefix_known {
+                self.dfa.states[self.current_state_id as usize]
+                    .set_transition(lower_key as u8, next_id);
+            }
+            self.current_state_id = next_id;
+        } else if self.dfa.is_full() {
+            // DFA frozen: detach so later keys take the slow path instead
+            // of false-hitting word-start edges from state 0. Snapshots
+            // already cover backspace via bypass_buffers (current == 0).
+            self.dfa_detached = true;
+            self.current_state_id = self.dfa.find_state(cache_comp).unwrap_or(0);
+        } else {
+            self.current_state_id = self.dfa.find_state(cache_comp).unwrap_or(0);
+        }
     }
 
     fn push_active(&mut self, trans: Transformation) {

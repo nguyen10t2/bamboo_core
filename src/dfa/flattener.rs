@@ -23,6 +23,41 @@ pub(crate) fn append_flatten_slice(
     write_canvas_slice(composition, options, out);
 }
 
+/// Destination for flattened characters. The generic canvas below
+/// monomorphizes per sink, so the hot [`String`] path codegens exactly like
+/// the direct `push` it replaces.
+pub(crate) trait CanvasSink {
+    fn push_char(&mut self, c: char);
+}
+
+impl CanvasSink for String {
+    #[inline(always)]
+    fn push_char(&mut self, c: char) {
+        self.push(c);
+    }
+}
+
+impl CanvasSink for Vec<u8> {
+    #[inline(always)]
+    fn push_char(&mut self, c: char) {
+        let mut buf = [0u8; 4];
+        self.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+    }
+}
+
+/// Appends the flattened composition as UTF-8 bytes without clearing `out`.
+/// Used by [`Dfa::add_state`](crate::dfa::Dfa::add_state) to fill the flat
+/// arena directly instead of round-tripping through a temporary `String`
+/// (one allocation plus a copy per new JIT state).
+pub(crate) fn append_flatten_bytes(
+    composition: &[Transformation],
+    options: OutputOptions,
+    out: &mut Vec<u8>,
+) {
+    out.reserve(estimate_cap_bytes_slice(composition, options));
+    write_canvas_slice(composition, options, out);
+}
+
 /// Same output as flattening with [`OutputOptions::RAW`], without the canvas
 /// setup, since `commit()` runs it on every word.
 pub(crate) fn append_raw_keys(composition: &[Transformation], out: &mut String) {
@@ -65,7 +100,11 @@ fn estimate_cap_bytes_slice(composition: &[Transformation], options: OutputOptio
     char_count * 4
 }
 
-fn write_canvas_slice(composition: &[Transformation], options: OutputOptions, out: &mut String) {
+fn write_canvas_slice<S: CanvasSink>(
+    composition: &[Transformation],
+    options: OutputOptions,
+    out: &mut S,
+) {
     if composition.is_empty() {
         return;
     }
@@ -157,7 +196,7 @@ fn write_canvas_slice(composition: &[Transformation], options: OutputOptions, ou
         } else {
             chr
         };
-        out.push(final_chr);
+        out.push_char(final_chr);
     }
 }
 
@@ -257,5 +296,28 @@ mod tests {
             Transformation::new('s', '\0', '\0', Some(0), 2, EffectType::ToneTransformation, false);
         let comp = vec![o, hat, acute];
         assert_eq!(flatten_slice(&comp, OutputOptions::NONE), "ố");
+    }
+
+    #[test]
+    fn byte_sink_matches_string_sink() {
+        let o = Transformation::new('o', 'o', 'o', None, 0, EffectType::Appending, true);
+        let hat =
+            Transformation::new('o', 'o', 'ô', Some(0), 1, EffectType::MarkTransformation, false);
+        let acute =
+            Transformation::new('s', '\0', '\0', Some(0), 2, EffectType::ToneTransformation, false);
+        let comp = vec![o, hat, acute];
+        let options = [
+            OutputOptions::NONE,
+            OutputOptions::RAW,
+            OutputOptions::LOWER_CASE,
+            OutputOptions::TONE_LESS,
+            OutputOptions::MARK_LESS,
+            OutputOptions::FULL_TEXT,
+        ];
+        for option in options {
+            let mut bytes = Vec::new();
+            append_flatten_bytes(&comp, option, &mut bytes);
+            assert_eq!(bytes, flatten_slice(&comp, option).as_bytes(), "{option:?}");
+        }
     }
 }

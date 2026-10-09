@@ -315,6 +315,10 @@ pub unsafe extern "C" fn bamboo_engine_free(engine: *mut BambooEngine) {
 
 /// Processes a key using a specific engine instance.
 ///
+/// Each call allocates the returned string; per-keystroke polling loops
+/// should prefer [`bamboo_engine_process_key_buf`], which writes into a
+/// caller-provided buffer instead.
+///
 /// # Safety
 /// - `engine` must be a valid, non-null pointer to a `BambooEngine` instance.
 /// - The caller is responsible for freeing the returned string using `bamboo_free_string`.

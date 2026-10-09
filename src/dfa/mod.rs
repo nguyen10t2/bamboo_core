@@ -287,6 +287,8 @@ impl Dfa {
     /// allocating. Callers must skip `set_transition` on `0` and fall back to
     /// `find_state(...).unwrap_or(0)` (rule-engine slow path stays correct).
     pub fn add_state(&mut self, composition: &[Transformation]) -> u32 {
+        // Arena-bounded: `comp_len`/`flat_len` below truncate into `u8`.
+        debug_assert!(composition.len() <= MAX_TRANS);
         let hash = hash_composition(composition);
 
         // Fast path: hash match -> verify arena equality (no heap allocation).
@@ -316,15 +318,14 @@ impl Dfa {
         let comp_offset = self.arena.len() as u32;
         let comp_len = composition.len() as u8;
 
-        // Cache the flattened lowercase output for P1 fast preedit reconstruction.
+        // Cache the flattened lowercase output for P1 fast preedit reconstruction,
+        // writing UTF-8 straight into the arena (no temporary `String`).
         let flat_offset = self.flat_arena.len() as u32;
-        let mut tmp = String::new();
-        crate::flattener::append_flatten_slice(
+        crate::flattener::append_flatten_bytes(
             composition,
             crate::mode::OutputOptions::LOWER_CASE,
-            &mut tmp,
+            &mut self.flat_arena,
         );
-        self.flat_arena.extend_from_slice(tmp.as_bytes());
         let flat_len = (self.flat_arena.len() - flat_offset as usize) as u8;
 
         self.arena.extend_from_slice(composition);
