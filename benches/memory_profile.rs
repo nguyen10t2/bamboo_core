@@ -668,6 +668,14 @@ fn test_sustained_no_commit() {
 // ===========================================================================
 
 fn main() {
+    // `cargo test --all-targets` executes bench mains with no args: run a
+    // fast smoke instead of the EXTREME suite (`cargo bench` only, which
+    // passes `--bench`).
+    if !std::env::args().any(|a| a == "--bench") {
+        println!("(smoke under `cargo test`; run `cargo bench` for the full profiling suite)");
+        test_struct_sizes();
+        return;
+    }
     println!("╔══════════════════════════════════════════════════════════════════════╗");
     println!("║            Bamboo-core — RAM & Memory Profiling (EXTREME)            ║");
     println!("╚══════════════════════════════════════════════════════════════════════╝");

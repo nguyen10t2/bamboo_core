@@ -4,7 +4,7 @@
 //! Reports are written to `target/criterion/`.
 
 use bamboo_core::{Engine, InputMethodPreset, Mode, RestoreMark};
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group};
 use std::hint::black_box;
 
 fn fresh_engine() -> Engine {
@@ -164,4 +164,14 @@ criterion_group!(
     bench_sentence,
     bench_commit
 );
-criterion_main!(benches);
+
+fn main() {
+    // `cargo test --all-targets` executes bench mains with no args: run a
+    // fast smoke instead of the full criterion suite (`cargo bench` only,
+    // which passes `--bench`).
+    if !std::env::args().any(|a| a == "--bench") {
+        println!("(smoke under `cargo test`; run `cargo bench` for the full criterion suite)");
+        return;
+    }
+    benches();
+}

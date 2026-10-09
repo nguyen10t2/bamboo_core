@@ -13,8 +13,9 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use bamboo_core::{Engine, InputMethodPreset, Mode, RestoreMark};
+use bamboo_core::{Engine, InputMethodPreset, Mode, OutputOptions, RestoreMark};
 use serial_test::serial;
+use std::borrow::Cow;
 use std::hint::black_box;
 
 /// Thread-safe counting allocator wrapping the system allocator.
@@ -172,6 +173,38 @@ fn zero_alloc_english_passthrough() {
         n <= 50,
         "English passthrough should be near-zero alloc (commit growth only), got {n} allocs"
     );
+}
+
+#[test]
+#[serial]
+fn zero_alloc_lowercase_poll_borrowed() {
+    let mut e = warm_telex();
+    // Warm the polled word so its lowercase flatten is cached in the DFA.
+    e.process_str("tieengs", Mode::Vietnamese);
+    let (n, _) = measure_allocs(|| {
+        for _ in 0..100 {
+            let cow = e.get_processed_str_cow(OutputOptions::LOWER_CASE);
+            assert!(matches!(cow, Cow::Borrowed(_)));
+            black_box(cow);
+        }
+    });
+    assert_eq!(n, 0, "LOWER_CASE poll on a warm word must borrow with zero alloc, got {n}");
+}
+
+#[test]
+#[serial]
+fn bounded_alloc_jit_new_state() {
+    let mut e = warm_telex();
+    // A word the DFA has never seen forces add_state (arena + flat growth
+    // written directly, without a temporary String).
+    let (n, _) = measure_allocs(|| {
+        e.process_str("dduwowngf", Mode::Vietnamese);
+        black_box(e.output_str());
+    });
+    assert_eq!(e.output(), "đường");
+    // Measured 2 on warmed arenas; a per-state temporary String (the old
+    // flat-cache path) would cost ~1 extra alloc per keystroke and trip this.
+    assert!(n <= 8, "one cold word should allocate boundedly, got {n} allocs");
 }
 
 #[test]

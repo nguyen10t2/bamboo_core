@@ -25,6 +25,13 @@ All notable changes to this project will be documented in this file.
 - **Free onset–rime pairing:** any known onset now pairs with any rime (only the rime itself is constrained), so `krông`, `boặm`, `khuều` validate; the CV gate and its tables are removed.
 - **Horn placement after `uo`:** the horn now goes on `o` when nothing follows (`khuow` gives `khuơ`, not `khuơ` with spread) and spreads to `u` only when a letter follows (`huouw` gives `hươu`), matching Go bamboo-core. Note: bare `uow` now gives `uơ` instead of `ươ`.
 
+### Performance
+- **`Engine` 1216 B → 688 B:** persisted scratch stacks removed (proven write-only), DFA arenas start unallocated (~20 KiB saved per fresh engine), hot fields first. Hit-path working set ≈ 360 B (L1-resident).
+- **Zero-alloc polling:** `LOWER_CASE` reads borrow the DFA flat cache on warm words; batch `process_batch` reuses one engine per thread (26x per-item win over fresh-engine batching in microbench).
+- **Slow path:** one shared `extract_cvc_trans` per validate-then-refresh keystroke; `last_syllable_start` resume hint; tone-presence guards before spelling/extraction work.
+- **Hygiene:** dead code removed (`flatten_slice_into`, `pop`, unused rune/key helpers, `DfaCompiler` dead fields + lifetime); `#[must_use]` on pure APIs; `debug_assert` guards for narrowing casts and the incremental case mask; slow-path helpers split out of the 206-line `process_key_internal`.
+- **Benches:** all six bench binaries run a fast smoke under `cargo test` (full suites are `cargo bench`-only), so `cargo test --all-targets` finishes in seconds instead of timing out on benchmark mains.
+
 ## [0.3.25] - 2026-09-25
 
 ### Performance & Memory

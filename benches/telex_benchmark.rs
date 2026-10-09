@@ -55,7 +55,26 @@ macro_rules! setup_engines {
     }};
 }
 
+/// Fast smoke for `cargo test` runs (bench mains get no args there).
+/// The full suite only runs under `cargo bench` (which passes `--bench`).
+fn smoke() {
+    println!("(smoke under `cargo test`; run `cargo bench` for the full suite)");
+    let mut e = Engine::new(InputMethod::telex());
+    e.warm_up();
+    let start = Instant::now();
+    for _ in 0..2000 {
+        e.reset();
+        e.process_str("tieengs", Mode::Vietnamese);
+        std::hint::black_box(e.output_str());
+    }
+    println!("smoke tieengs x2000: {:.1} ns/word", start.elapsed().as_nanos() as f64 / 2000.0);
+}
+
 fn main() {
+    if !std::env::args().any(|a| a == "--bench") {
+        smoke();
+        return;
+    }
     println!("=== Bamboo-core Telex Benchmark (no skey) ===");
 
     // Category 1: tones (fresh engine per call = cold/slow path)

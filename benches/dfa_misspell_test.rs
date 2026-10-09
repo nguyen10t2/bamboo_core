@@ -1,7 +1,24 @@
 #![allow(deprecated, unused)]
 use bamboo_core::{Engine, InputMethod, Mode};
 
+/// Fast smoke for `cargo test` runs (bench mains get no args there).
+/// The full suite only runs under `cargo bench` (which passes `--bench`).
+fn smoke() {
+    println!("(smoke under `cargo test`; run `cargo bench` for the full suite)");
+    let mut e = Engine::new(InputMethod::telex());
+    for _ in 0..200 {
+        e.process_str("xyzabc", Mode::Vietnamese);
+        e.process_key(' ', Mode::Vietnamese);
+        e.commit();
+    }
+    println!("smoke misspell x200: dfa_states={}", e.dfa_state_count());
+}
+
 fn main() {
+    if !std::env::args().any(|a| a == "--bench") {
+        smoke();
+        return;
+    }
     println!("=== DFA growth with MISSPELLED input ===\n");
 
     let mut e = Engine::new(InputMethod::telex());
