@@ -26,42 +26,17 @@ pub use state::{MAX_ACTIVE_TRANS, RestoreMark, Transformation, TransformationSta
 /// The engine uses a hybrid approach combining a Rule Engine with a Lazy JIT DFA for peak performance.
 #[derive(Debug)]
 pub struct Engine {
-    committed_text: String,
-    /// Keys behind `committed_text`, so `RAW | FULL_TEXT` can cover committed words.
-    committed_raw: String,
+    // Hot per-keystroke state first so it shares the first cache lines;
+    // cold committed text and lazy boxes live at the tail.
+    /// Stack-allocated buffer for the active composition: touched by every keystroke.
+    active_buffer: [Transformation; MAX_ACTIVE_TRANS],
     /// Cached preedit string of the active composition for zero-allocation [`output()`](Self::output).
     cached_output: String,
-    /// Stack-allocated buffer for the active composition to avoid heap allocations.
-    active_buffer: [Transformation; MAX_ACTIVE_TRANS],
     active_len: usize,
-
-    pub(crate) input_method: Arc<InputMethod>,
-    pub(crate) rules: Arc<EngineRules>,
-    config: Config,
-
-    /// Stack buffers to avoid per-keystroke heap allocations.
-    pub(crate) work_comp: TransformationStack,
-    pub(crate) scratch_comp: TransformationStack,
-
-    prev_preedit: String,
-    delta_buf: String,
-
-    dfa: crate::dfa::Dfa,
-    current_state_id: u32,
-
     /// Snapshot stack for O(1) backspace — 8-byte metadata per slot, zero heap.
     snapshots: [Snapshot; MAX_ACTIVE_TRANS],
     snapshot_len: usize,
-    /// Lazily-allocated side buffer for snapshots whose composition is not in
-    /// the DFA (English bypass / fallback). Only written when needed.
-    bypass_buffers: Option<Box<[[Transformation; MAX_ACTIVE_TRANS]; MAX_ACTIVE_TRANS]>>,
-
-    /// Lazily-initialized scratch engine for `restore_last_word` to avoid repeated `with_config`.
-    pub(crate) scratch_engine: Option<Box<Engine>>,
-    /// Resume hint for `last_syllable_start`: consecutive slow-path keys see
-    /// the same prefix plus a short tail, so only suffix windows are
-    /// re-validated. Self-validating (stale ⇒ full rescan), 16 bytes.
-    syll_hint: crate::syllable::SyllHint,
+    current_state_id: u32,
     english_bypass: bool,
     /// True once the DFA refused a new composition (frozen at
     /// [`crate::dfa::DFA_MAX_STATES`]).
@@ -73,6 +48,27 @@ pub struct Engine {
     /// guarded by `(active_len == 0 || current_state_id != 0)`, so a lookup
     /// from state 0 can only run on empty active text (true word start).
     dfa_detached: bool,
+    dfa: crate::dfa::Dfa,
+    /// Resume hint for `last_syllable_start`: consecutive slow-path keys see
+    /// the same prefix plus a short tail, so only suffix windows are
+    /// re-validated. Self-validating (stale ⇒ full rescan), 16 bytes.
+    syll_hint: crate::syllable::SyllHint,
+
+    pub(crate) input_method: Arc<InputMethod>,
+    pub(crate) rules: Arc<EngineRules>,
+    config: Config,
+
+    committed_text: String,
+    /// Keys behind `committed_text`, so `RAW | FULL_TEXT` can cover committed words.
+    committed_raw: String,
+    prev_preedit: String,
+    delta_buf: String,
+    /// Lazily-allocated side buffer for snapshots whose composition is not in
+    /// the DFA (English bypass / fallback). Only written when needed.
+    bypass_buffers: Option<Box<[[Transformation; MAX_ACTIVE_TRANS]; MAX_ACTIVE_TRANS]>>,
+
+    /// Lazily-initialized scratch engine for `restore_last_word` to avoid repeated `with_config`.
+    pub(crate) scratch_engine: Option<Box<Engine>>,
 }
 
 impl Engine {
@@ -117,9 +113,6 @@ impl Engine {
             input_method,
             rules,
             config,
-
-            work_comp: TransformationStack::new(),
-            scratch_comp: TransformationStack::new(),
 
             prev_preedit: String::with_capacity(32),
             delta_buf: String::with_capacity(32),
@@ -264,6 +257,7 @@ impl Engine {
     }
 
     /// Returns a reference to the current input method.
+    #[must_use]
     pub fn input_method(&self) -> &InputMethod {
         &self.input_method
     }
@@ -310,6 +304,7 @@ impl Engine {
 
     /// Returns true if `key` takes part in Vietnamese composition at this point, as
     /// opposed to being typed as is (and ending the word, for punctuation).
+    #[must_use]
     pub fn can_process_key(&self, key: char) -> bool {
         let lower_key = lower(key);
         self.can_process_key_raw(lower_key)
@@ -439,11 +434,17 @@ impl Engine {
         });
 
         composition.extend_from_slice(trans_buf.as_slice());
-        if self.config.free_tone_marking && self.is_valid_internal(composition.as_slice(), false) {
-            crate::syllable::refresh_last_tone_target_into(
-                composition.as_mut_slice(),
-                self.config.std_tone_style,
-            );
+        if self.config.free_tone_marking {
+            // `check_validity` hands back the tone-check breakdown so the
+            // refresh below reuses a single `extract_cvc_trans` per keystroke.
+            let (valid, tone_cvc) = crate::syllable::check_validity(composition.as_slice(), false);
+            if valid && let Some(cvc) = tone_cvc {
+                crate::syllable::refresh_with_cvc(
+                    composition.as_mut_slice(),
+                    &cvc,
+                    self.config.std_tone_style,
+                );
+            }
         }
         has_undo
     }
@@ -504,6 +505,7 @@ impl Engine {
     /// - [`process_str`](Self::process_str) + [`output`](Self::output) for batch processing
     ///
     /// This method may be deprecated or removed in a future version.
+    #[must_use]
     pub fn process(&mut self, s: &str, mode: Mode) -> String {
         self.process_str(s, mode).output().into_owned()
     }
@@ -602,6 +604,7 @@ impl Engine {
     /// assert_eq!(bs, 1);
     /// assert_eq!(ins, "á");
     /// ```
+    #[must_use]
     pub fn process_key_delta(&mut self, key: char, mode: Mode) -> (usize, usize, &str) {
         self.process_key(key, mode);
 
@@ -625,6 +628,7 @@ impl Engine {
     ///
     /// # Returns
     /// `backspace_count` — number of characters to delete from the end of the previous preedit.
+    #[must_use]
     pub fn process_key_delta_into(
         &mut self,
         key: char,
@@ -765,8 +769,11 @@ impl Engine {
                     .composition_matches_canonical(self.current_state_id, self.active_slice())
         };
 
-        let mut work = self.work_comp;
-        let mut scratch = self.scratch_comp;
+        // Local scratch stacks: the previous persisted copies were never
+        // read (every use clears first via `take_active_into`/`drain_to`),
+        // so keeping them as `Engine` fields only cost 528 B of footprint.
+        let mut work = TransformationStack::new();
+        let mut scratch = TransformationStack::new();
 
         self.take_active_into(&mut work);
         let has_undo =
@@ -810,12 +817,12 @@ impl Engine {
             // For uppercase: create a lowercase copy of the composition for DFA caching.
             // This ensures both 'a' and 'A' share the same DFA transition from the same state.
             let cache_comp = if work.as_slice().iter().any(|t| t.is_upper_case) {
-                self.scratch_comp.clear();
-                self.scratch_comp.extend_from_slice(work.as_slice());
-                for t in self.scratch_comp.as_mut_slice() {
+                scratch.clear();
+                scratch.extend_from_slice(work.as_slice());
+                for t in scratch.as_mut_slice() {
                     t.is_upper_case = false;
                 }
-                self.scratch_comp.as_slice()
+                scratch.as_slice()
             } else {
                 work.as_slice()
             };
@@ -852,9 +859,6 @@ impl Engine {
         }
 
         self.set_active_from_stack(&mut work);
-
-        self.work_comp = work;
-        self.scratch_comp = scratch;
     }
 
     fn push_active(&mut self, trans: Transformation) {
@@ -893,6 +897,7 @@ impl Engine {
     ///
     /// This performs **zero heap allocations**, borrowing directly from the engine's internal preedit cache.
     #[inline]
+    #[must_use]
     pub fn output_str(&self) -> &str {
         &self.cached_output
     }
@@ -901,6 +906,7 @@ impl Engine {
     ///
     /// This returns a zero-allocation [`Cow::Borrowed`] pointing to the internal preedit cache.
     #[inline]
+    #[must_use]
     pub fn output(&self) -> Cow<'_, str> {
         Cow::Borrowed(&self.cached_output)
     }
@@ -908,6 +914,7 @@ impl Engine {
     /// Returns the processed string as a [`Cow<str>`] according to the specified options.
     ///
     /// Avoids heap allocations when the active buffer is empty or directly borrowable.
+    #[must_use]
     pub fn get_processed_str_cow(&self, options: OutputOptions) -> Cow<'_, str> {
         let active = self.active_slice();
         if options.contains(OutputOptions::FULL_TEXT) {
@@ -945,6 +952,15 @@ impl Engine {
             Cow::Borrowed("")
         } else if options == OutputOptions::NONE {
             Cow::Borrowed(&self.cached_output)
+        } else if options == OutputOptions::LOWER_CASE
+            && self.current_state_id != 0
+            && !self.dfa.get_flat(self.current_state_id).is_empty()
+        {
+            // The DFA caches the lowercase flatten of the canonical
+            // composition, which is exactly `LOWER_CASE` output (case bits do
+            // not matter once lowered). Polling readers such as per-keystroke
+            // validity checks borrow it with zero allocation or flattening.
+            Cow::Borrowed(self.dfa.get_flat(self.current_state_id))
         } else {
             Cow::Owned(crate::flattener::flatten_slice(active, options))
         }
@@ -953,11 +969,17 @@ impl Engine {
     /// Returns the processed string according to the specified options.
     ///
     /// This can be used to get the full text (committed + active) or variations like toneless text.
+    ///
+    /// Polling callers (e.g. per-keystroke validity checks) should prefer
+    /// [`get_processed_str_cow`](Self::get_processed_str_cow): it borrows the
+    /// cached output for `NONE`, `FULL_TEXT`-without-options and warmed
+    /// `LOWER_CASE` reads instead of allocating.
     pub fn get_processed_str(&self, options: OutputOptions) -> String {
         self.get_processed_str_cow(options).into_owned()
     }
 
     /// Checks if the current composition forms a valid Vietnamese syllable.
+    #[must_use]
     pub fn is_valid(&self, input_is_full_complete: bool) -> bool {
         self.is_valid_internal(self.active_slice(), input_is_full_complete)
     }
@@ -1069,76 +1091,91 @@ impl Engine {
     }
 
     /// Returns the number of DFA states currently cached.
+    #[must_use]
     pub const fn dfa_state_count(&self) -> usize {
         self.dfa.states.len()
     }
 
     /// Returns the number of Transformations stored in the DFA arena.
+    #[must_use]
     pub const fn dfa_arena_len(&self) -> usize {
         self.dfa.arena.len()
     }
 
     /// Returns the number of entries in the DFA composition-to-state map.
+    #[must_use]
     pub fn dfa_composition_count(&self) -> usize {
         self.dfa.hash_to_state.len()
     }
 
     /// Returns the number of bytes in the DFA flattened-output arena.
+    #[must_use]
     pub const fn dfa_flat_len(&self) -> usize {
         self.dfa.flat_len()
     }
 
     /// Returns DFA Vec capacities for memory accounting (states slots).
+    #[must_use]
     pub const fn dfa_states_capacity(&self) -> usize {
         self.dfa.states_capacity()
     }
 
     /// Returns DFA arena capacity in [`Transformation`] slots.
+    #[must_use]
     pub const fn dfa_arena_capacity(&self) -> usize {
         self.dfa.arena_capacity()
     }
 
     /// Returns DFA flat-arena capacity in bytes.
+    #[must_use]
     pub const fn dfa_flat_capacity(&self) -> usize {
         self.dfa.flat_capacity()
     }
 
     /// Returns DFA hash-map capacity (buckets).
+    #[must_use]
     pub fn dfa_map_capacity(&self) -> usize {
         self.dfa.map_capacity()
     }
 
     /// Estimates DFA heap `used` bytes (no slack). See [`crate::dfa::Dfa::memory_used_bytes`].
+    #[must_use]
     pub fn dfa_memory_used(&self) -> usize {
         self.dfa.memory_used_bytes()
     }
 
     /// Estimates DFA heap `allocated` bytes (with Vec slack).
+    #[must_use]
     pub fn dfa_memory_allocated(&self) -> usize {
         self.dfa.memory_allocated_bytes()
     }
 
     /// Returns the capacity (in bytes) of the `committed_text` buffer.
+    #[must_use]
     pub const fn committed_text_capacity(&self) -> usize {
         self.committed_text.capacity()
     }
 
     /// Returns the length (in bytes) of the committed text.
+    #[must_use]
     pub const fn committed_text_len(&self) -> usize {
         self.committed_text.len()
     }
 
     /// Returns true if the lazy snapshot bypass buffer (4 KiB) has been allocated.
+    #[must_use]
     pub const fn bypass_allocated(&self) -> bool {
         self.bypass_buffers.is_some()
     }
 
     /// Returns the number of active transformations in the current syllable.
+    #[must_use]
     pub const fn active_len(&self) -> usize {
         self.active_len
     }
 
     /// Returns the number of snapshots stored for backspace.
+    #[must_use]
     pub const fn snapshot_len(&self) -> usize {
         self.snapshot_len
     }

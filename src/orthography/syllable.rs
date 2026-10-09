@@ -91,22 +91,38 @@ fn find_root_target(composition: &[Transformation], mut target: u8) -> u8 {
 
 /// Checks if the current composition represents a valid Vietnamese syllable.
 pub(crate) fn is_valid(composition: &[Transformation], input_is_full_complete: bool) -> bool {
+    check_validity(composition, input_is_full_complete).0
+}
+
+/// Validity plus the tone-check breakdown, when a tone transformation is
+/// present. Lets validate-then-refresh call sites (engine slow path) reuse
+/// one `extract_cvc_trans` instead of extracting twice per keystroke.
+pub(crate) fn check_validity(
+    composition: &[Transformation],
+    input_is_full_complete: bool,
+) -> (bool, Option<Cvc>) {
+    let tone = composition.iter().rev().find(|t| t.effect_type == EffectType::ToneTransformation);
     if composition.len() <= 1 {
-        return true;
+        let cvc = tone.map(|_| extract_cvc_trans(composition));
+        return (true, cvc);
     }
 
     // last tone checking
-    if let Some(trans) =
-        composition.iter().rev().find(|t| t.effect_type == EffectType::ToneTransformation)
-    {
+    let mut tone_cvc = None;
+    if let Some(trans) = tone {
         let last_tone = trans.tone();
         let cvc = extract_cvc_trans(composition);
         if !has_valid_tone(composition, &cvc, last_tone) {
-            return false;
+            return (false, None);
         }
+        tone_cvc = Some(cvc);
     }
 
-    // spell checking (fast path: no heap for engine's bounded composition)
+    (spell_check(composition, input_is_full_complete), tone_cvc)
+}
+
+// spell checking (fast path: no heap for engine's bounded composition)
+fn spell_check(composition: &[Transformation], input_is_full_complete: bool) -> bool {
     if composition.len() <= MAX_ACTIVE_TRANS {
         let mut app_abs = [0usize; MAX_ACTIVE_TRANS];
         let mut app_len = 0usize;
@@ -1166,13 +1182,20 @@ pub(crate) fn refresh_last_tone_target_into(composition: &mut [Transformation], 
     if get_last_tone_transformation(composition).is_none() {
         return;
     }
+    let cvc = extract_cvc_trans(composition);
+    refresh_with_cvc(composition, &cvc, std_style);
+}
+
+/// Tone-target refresh reusing a caller-provided breakdown (see
+/// [`check_validity`]), saving a second `extract_cvc_trans` per keystroke on
+/// the validate-then-refresh slow path.
+pub(crate) fn refresh_with_cvc(composition: &mut [Transformation], cvc: &Cvc, std_style: bool) {
     let (new_tone_target, last_tone_idx) = {
-        let cvc = extract_cvc_trans(composition);
         if cvc.vo_len == 0 {
             return;
         }
 
-        let new_tone_target = find_tone_target(composition, &cvc, std_style);
+        let new_tone_target = find_tone_target(composition, cvc, std_style);
 
         let last_tone_idx = composition
             .iter()

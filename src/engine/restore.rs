@@ -8,7 +8,7 @@ impl Engine {
     ///
     /// If `to_vietnamese` is true, it attempts to re-apply Vietnamese transformations.
     pub fn restore_last_word(&mut self, to_vietnamese: bool) {
-        let mut work = self.work_comp;
+        let mut work = TransformationStack::new();
 
         self.take_active_into(&mut work);
         if work.is_empty() {
