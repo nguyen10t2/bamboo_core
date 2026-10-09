@@ -12,18 +12,6 @@ pub(crate) fn flatten_slice(composition: &[Transformation], options: OutputOptio
     out
 }
 
-/// Similar to [`flatten_slice`], but writes the result into an existing string buffer.
-#[allow(dead_code)]
-pub(crate) fn flatten_slice_into(
-    composition: &[Transformation],
-    options: OutputOptions,
-    out: &mut String,
-) {
-    out.clear();
-    out.reserve(estimate_cap_bytes_slice(composition, options));
-    write_canvas_slice(composition, options, out);
-}
-
 /// Appends the flattened composition to an existing string buffer without clearing it.
 /// Used by `commit()` to avoid allocating a temporary String.
 pub(crate) fn append_flatten_slice(

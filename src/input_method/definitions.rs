@@ -190,8 +190,3 @@ pub fn get_input_method(name: &str) -> Option<&'static InputMethodDef> {
 pub fn get_input_method_definitions() -> &'static Map<&'static str, &'static InputMethodDef> {
     &INPUT_METHOD_DEFS
 }
-
-#[allow(unused)]
-pub fn lookup_key(method: &str, key: &str) -> Option<&'static str> {
-    INPUT_METHOD_DEFS.get(method).and_then(|m| m.get(key)).copied()
-}

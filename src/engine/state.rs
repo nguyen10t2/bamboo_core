@@ -165,17 +165,6 @@ impl TransformationStack {
         }
     }
 
-    /// Removes and returns the last transformation from the stack.
-    #[allow(dead_code)]
-    pub const fn pop(&mut self) -> Option<Transformation> {
-        if self.len > 0 {
-            self.len -= 1;
-            Some(self.data[self.len])
-        } else {
-            None
-        }
-    }
-
     /// Clears all transformations from the stack.
     pub const fn clear(&mut self) {
         self.len = 0;

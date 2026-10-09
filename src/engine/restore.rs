@@ -46,7 +46,9 @@ impl Engine {
                 self.config,
             )));
         }
-        let temp_engine = self.scratch_engine.as_mut().unwrap();
+        let Some(temp_engine) = self.scratch_engine.as_mut() else {
+            return;
+        };
         temp_engine.reset();
 
         for t in last {

@@ -440,23 +440,17 @@ impl Dfa {
 }
 
 /// A DFA compiler that pre-initializes common syllable states into a [`Dfa`].
-pub struct DfaCompiler<'a> {
-    /// The input method used for compiling transitions.
-    #[allow(dead_code)]
-    pub input_method: &'a InputMethod,
-    /// Engine configuration.
-    #[allow(dead_code)]
-    pub config: crate::Config,
+pub struct DfaCompiler {
     /// The compiled DFA instance.
     pub dfa: Dfa,
     engine: crate::Engine,
 }
 
-impl<'a> DfaCompiler<'a> {
+impl DfaCompiler {
     /// Creates a new compiler instance for a given input method and configuration.
-    pub fn new(im: &'a InputMethod, config: crate::Config) -> Self {
+    pub fn new(im: &InputMethod, config: crate::Config) -> Self {
         let engine = crate::Engine::with_config(im.clone(), config);
-        Self { input_method: im, config, dfa: Dfa::new(), engine }
+        Self { dfa: Dfa::new(), engine }
     }
 
     /// Compiles common Vietnamese syllables into the DFA.

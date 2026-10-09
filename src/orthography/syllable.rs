@@ -1160,9 +1160,15 @@ pub(crate) fn break_composition_slice(
 
 /// Updates the tone target in the composition based on the current syllable structure and tone style.
 pub(crate) fn refresh_last_tone_target_into(composition: &mut [Transformation], std_style: bool) {
+    // Cheap guard first: without a tone to move there is nothing to refresh.
+    // This skips `extract_cvc_trans` on toneless compositions (same early exit
+    // as before, only reordered).
+    if get_last_tone_transformation(composition).is_none() {
+        return;
+    }
     let (new_tone_target, last_tone_idx) = {
         let cvc = extract_cvc_trans(composition);
-        if cvc.vo_len == 0 || get_last_tone_transformation(composition).is_none() {
+        if cvc.vo_len == 0 {
             return;
         }
 
